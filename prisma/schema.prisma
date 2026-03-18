@@ -1,0 +1,154 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Upload {
+  id               String        @id @default(cuid())
+  filename         String
+  fileType         FileType
+  uploadedAt       DateTime      @default(now())
+  transactionCount Int           @default(0)
+  status           UploadStatus  @default(PROCESSING)
+  // TTL: upload + tijdelijke transacties vervallen 2 uur na aanmaken
+  expiresAt        DateTime?
+  transactions     BankTransaction[]
+
+  @@index([expiresAt])
+}
+
+model BankTransaction {
+  id               String            @id @default(cuid())
+  hash             String            @unique
+  uploadId         String
+  upload           Upload            @relation(fields: [uploadId], references: [id])
+  bankReference    String?
+  transactionDate  DateTime
+  valueDate        DateTime?
+  amount           Decimal           @db.Decimal(12, 2)
+  currency         String            @default("EUR")
+  creditDebit      CreditDebit
+  counterpartyName String?
+  counterpartyIban String?
+  description      String?
+  rawData          String            @db.Text
+  status           TransactionStatus @default(PENDING)
+  matchedInvoiceId String?
+  confidence       Decimal?          @db.Decimal(4, 3)
+  matchType        String?
+  matchReason      String?
+  duplicateReason  String?           // Reden waarom als duplicaat gemarkeerd
+  // TTL: NULL = permanent (verwerkte betalingen), ingesteld = tijdelijk
+  // Wordt op NULL gezet zodra status PROCESSED of PARTIAL_SUCCESS wordt
+  expiresAt        DateTime?
+  paymentLogs      PaymentLog[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([status])
+  @@index([transactionDate])
+  @@index([amount])
+  @@index([expiresAt])
+}
+
+// Cache van openstaande facturen uit RentMagic
+model InvoiceCache {
+  id           String    @id @default(cuid())
+  invoiceId    String    @unique
+  customerId   String?
+  customerName String?
+  totalAmount  Decimal   @db.Decimal(12, 2)
+  openAmount   Decimal   @db.Decimal(12, 2)
+  invoiceDate  DateTime?
+  dueDate      DateTime?
+  status       String?
+  rawData      Json?
+  syncedAt     DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([openAmount])
+  @@index([customerName])
+  @@index([invoiceId])
+}
+
+// Permanente log van elke RentMagic API-aanroep — nooit verwijderen
+// Dit is de audit trail van wat er daadwerkelijk naar RentMagic gestuurd is
+model PaymentLog {
+  id                 String          @id @default(cuid())
+  transactionId      String
+  // onDelete: Cascade zodat cleanup van BankTransaction ook de PaymentLog meeneemt
+  // voor niet-verwerkte transacties. Verwerkte transacties hebben expiresAt = null
+  // dus die worden nooit gecleanup'd.
+  transaction        BankTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  invoiceId          String
+  amount             Decimal         @db.Decimal(12, 2)
+  rentmagicPaymentId String?
+  paymentStatus      LogStatus       @default(PENDING)
+  labelStatus        LogStatus       @default(PENDING)
+  paymentRequest     Json?
+  paymentResponse    Json?
+  labelRequest       Json?
+  labelResponse      Json?
+  errorMessage       String?
+  retryCount         Int             @default(0)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([transactionId])
+  @@index([invoiceId])
+}
+
+// Audit trail van alle acties — permanent
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String
+  payload    Json?
+  response   Json?
+  success    Boolean
+  errorMsg   String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityId])
+  @@index([entityType])
+  @@index([createdAt])
+}
+
+enum FileType {
+  CAMT053
+  MT940
+}
+
+enum UploadStatus {
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum CreditDebit {
+  CRDT
+  DBIT
+}
+
+enum TransactionStatus {
+  PENDING
+  AUTO_MATCHED
+  REVIEW
+  PROCESSED
+  PARTIAL_SUCCESS
+  REJECTED
+  DUPLICATE
+}
+
+enum LogStatus {
+  SUCCESS
+  FAILED
+  PENDING
+  SKIPPED
+}

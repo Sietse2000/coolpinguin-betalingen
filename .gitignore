@@ -1,0 +1,17 @@
+# Environment
+.env
+.env.local
+.env*.local
+
+# Next.js
+.next/
+out/
+
+# Node
+node_modules/
+
+# Prisma
+prisma/migrations/
+
+# OS
+.DS_Store
