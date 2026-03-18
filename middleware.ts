@@ -1,19 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { computeSessionToken, COOKIE_NAME } from '@/lib/auth'
 
-const PUBLIC = ['/login', '/api/health', '/api/auth']
+const COOKIE_NAME = 'session'
 
-export async function middleware(req: NextRequest) {
+const PUBLIC_PREFIXES = [
+  '/login',
+  '/api/health',
+  '/api/auth',
+  '/_next',
+  '/favicon.ico',
+]
+
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  if (PUBLIC.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
+  if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
     return NextResponse.next()
   }
 
-  const cookie = req.cookies.get(COOKIE_NAME)?.value
-  const expected = await computeSessionToken()
-
-  if (!cookie || cookie !== expected) {
+  const session = req.cookies.get(COOKIE_NAME)?.value
+  if (!session) {
     const url = req.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
