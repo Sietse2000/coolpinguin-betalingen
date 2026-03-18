@@ -200,6 +200,16 @@ function parse86(
     }
   }
 
+  // Tegenpartijnaam: NAME → BENM → ORDP → CDTR → vrije tekst fallback
+  const name =
+    parts['NAME'] ??
+    parts['BENM'] ??
+    parts['ORDP'] ??
+    parts['CDTR'] ??
+    extractNameFallback(info)
+
+  console.log(`[MT940:86] raw="${info.slice(0, 120)}" → name="${name ?? '—'}"`)
+
   // Omschrijving: REMI of vrije tekst
   const description =
     parts['REMI'] ??
@@ -208,11 +218,30 @@ function parse86(
     fallback.trim())
 
   return {
-    name: parts['NAME'],
+    name,
     iban: parts['IBAN'],
     description,
     bankRef: parts['EREF'],
   }
+}
+
+/**
+ * Fallback naam-extractie als geen gestructureerd NAME-veld aanwezig is.
+ * Probeert de eerste leesbare tekstregel te vinden die geen IBAN, BIC of getal is.
+ */
+function extractNameFallback(info: string): string | undefined {
+  const stripped = info.replace(/\/[A-Z]{2,6}\//g, '/').split('/')
+  for (const seg of stripped) {
+    const s = seg.trim()
+    if (!s) continue
+    if (/^[A-Z]{2,6}$/.test(s)) continue          // sleutelwoord
+    if (/^[A-Z]{2}\d{2}[A-Z0-9]{4}\d/.test(s)) continue // IBAN
+    if (/^[A-Z]{6}[A-Z0-9]{2}/.test(s)) continue  // BIC
+    if (/^\d+([,.]?\d+)?$/.test(s)) continue       // getal
+    if (s.length < 3) continue
+    return s
+  }
+  return undefined
 }
 
 /**

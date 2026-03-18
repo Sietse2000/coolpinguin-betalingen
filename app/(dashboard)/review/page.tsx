@@ -62,7 +62,7 @@ export default function ReviewPage() {
       const data = await res.json()
       setTotal(data.total ?? 0)
 
-      const txs: Tx[] = data.transactions ?? []
+      const txs: Tx[] = (data.transactions ?? []).filter((t: Tx) => t.status !== 'DUPLICATE')
       const enriched = await Promise.all(
         txs.map(async (tx) => {
           const r = await fetch(`/api/transactions/${tx.id}`)
@@ -304,14 +304,16 @@ export default function ReviewPage() {
                             </div>
                           </div>
 
-                          {/* Actie */}
-                          <button
-                            onClick={() => approve(tx!.id, m.invoiceId)}
-                            disabled={busy}
-                            className="btn-primary ml-4 flex-shrink-0"
-                          >
-                            {busy ? '…' : 'Goedkeuren'}
-                          </button>
+                          {/* Actie — verberg bij duplicaat */}
+                          {tx!.status !== 'DUPLICATE' && (
+                            <button
+                              onClick={() => approve(tx!.id, m.invoiceId)}
+                              disabled={busy}
+                              className="btn-primary ml-4 flex-shrink-0"
+                            >
+                              {busy ? '…' : 'Goedkeuren'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -336,7 +338,7 @@ export default function ReviewPage() {
                     >
                       Koppelen
                     </button>
-                    {tx!.matchedInvoiceId && (
+                    {tx!.matchedInvoiceId && tx!.status !== 'DUPLICATE' && (
                       <button
                         onClick={() => approve(tx!.id, tx!.matchedInvoiceId!)}
                         disabled={busy}

@@ -59,11 +59,16 @@ export async function processTransaction(
     }
   }
 
-  // Als er geen decision meegegeven is, haal de opgeslagen beslissing op uit de matchType
-  // Gebruik de voorzichtige default: payment ja, label alleen als matchType aangeeft dat het volledig is
-  const shouldSetLabel = decision
-    ? decision.setLabel
-    : tx.matchType === 'EXACT_FULL_PAYMENT'
+  // Label bepalen: als decision meegegeven → gebruik die. Anders (handmatig) → vergelijk
+  // transactiebedrag met openstaand saldo in de cache. Label alleen als saldo na betaling = 0.
+  let shouldSetLabel: boolean
+  if (decision) {
+    shouldSetLabel = decision.setLabel
+  } else {
+    const inv = await db.invoiceCache.findUnique({ where: { invoiceId }, select: { openAmount: true } })
+    const open = inv ? parseFloat(inv.openAmount.toString()) : null
+    shouldSetLabel = open !== null && Math.abs(parseFloat(tx.amount.toString()) - open) < 0.005
+  }
 
   const amount = parseFloat(tx.amount.toString())
 

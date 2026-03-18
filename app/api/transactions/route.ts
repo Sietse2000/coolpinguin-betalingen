@@ -16,8 +16,10 @@ export async function GET(req: NextRequest) {
     where = { status: 'DUPLICATE' }
   } else if (status) {
     // Specifiek statusfilter: toon alleen niet-verlopen records
+    // REVIEW-filter sluit DUPLICATE altijd uit — duplicaten horen in hun eigen filter
     where = {
       status: status as never,
+      NOT: status === 'REVIEW' ? { status: 'DUPLICATE' as never } : undefined,
       OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
     }
   } else {
