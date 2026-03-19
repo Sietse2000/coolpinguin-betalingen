@@ -144,7 +144,6 @@ enum TransactionStatus {
   PARTIAL_SUCCESS
   REJECTED
   DUPLICATE
-  PAID
 }
 
 enum LogStatus {

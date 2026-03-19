@@ -67,7 +67,6 @@ export async function POST(req: NextRequest) {
 
     let newCount = 0
     let dupCount = 0
-    let paidCount = 0
     let autoCount = 0
     let reviewCount = 0
     let skippedDebit = 0
@@ -120,7 +119,7 @@ export async function POST(req: NextRequest) {
       }
 
       // ── Status bepalen ──
-      let status: 'DUPLICATE' | 'PAID' | 'AUTO_MATCHED' | 'REVIEW' | 'PENDING'
+      let status: 'DUPLICATE' | 'AUTO_MATCHED' | 'REVIEW' | 'PENDING'
       const invoiceFound = !!(top?.invoiceId ?? matchResult.extractedInvoiceId)
       const isAlreadyPaid = dec.scenario === 'INVOICE_ALREADY_PAID'
 
@@ -130,15 +129,12 @@ export async function POST(req: NextRequest) {
         `factuurnr=${matchResult.extractedInvoiceId ?? '—'} | ` +
         `bestaat=${invoiceFound ? 'ja' : 'nee'} | ` +
         `openstaand=${isAlreadyPaid ? 'nee' : (top ? 'ja' : '?')} | ` +
-        `status→${isDuplicate ? 'DUPLICATE' : isAlreadyPaid ? 'PAID' : dec.autoProcess ? 'AUTO_MATCHED' : 'REVIEW/PENDING'}`
+        `status→${isDuplicate ? 'DUPLICATE' : isAlreadyPaid ? 'DUPLICATE(betaald)' : dec.autoProcess ? 'AUTO_MATCHED' : 'REVIEW/PENDING'}`
       )
 
-      if (isDuplicate) {
+      if (isDuplicate || isAlreadyPaid) {
+        // isAlreadyPaid: factuurnummer gevonden + bestaat in RM maar openAmount = 0 → al betaald
         status = 'DUPLICATE'
-      } else if (isAlreadyPaid) {
-        // Factuurnummer gevonden + bestaat in RM maar openAmount = 0 → al betaald
-        status = 'PAID'
-        paidCount++
       } else if (dec.autoProcess && (top || matchResult.multiInvoiceMatches)) {
         status = 'AUTO_MATCHED'
         autoCount++
@@ -203,11 +199,10 @@ export async function POST(req: NextRequest) {
       total: parsed.length,
       new: newCount,
       duplicates: dupCount,
-      paid: paidCount,
       skippedDebit,
       autoProcessing: autoCount,
       needsReview: reviewCount,
-      pending: newCount - autoCount - reviewCount - paidCount,
+      pending: newCount - autoCount - reviewCount,
       expiresAt: expiresAt.toISOString(),
     })
   } catch (err) {

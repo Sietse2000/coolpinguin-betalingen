@@ -11,26 +11,21 @@ export async function GET(req: NextRequest) {
 
   let where: object
 
-  // Statussen die nooit in de actieve werkwachtrij of review horen
-  const EXCLUDED_FROM_ACTIVE = ['DUPLICATE', 'PAID'] as const
-
-  if (status === 'DUPLICATE' || status === 'PAID') {
-    // Expliciet filter voor afzonderlijke eindstatussen — inclusief verlopen
-    where = { status: status as never }
+  if (status === 'DUPLICATE') {
+    // Expliciet filter voor duplicaten — toon ze inclusief verlopen
+    where = { status: 'DUPLICATE' }
   } else if (status) {
     // Specifiek statusfilter: toon alleen niet-verlopen records
-    // REVIEW sluit DUPLICATE en PAID altijd uit
+    // REVIEW-filter sluit DUPLICATE altijd uit
     where = {
       status: status as never,
-      NOT: status === 'REVIEW'
-        ? { status: { in: EXCLUDED_FROM_ACTIVE as never[] } }
-        : undefined,
+      NOT: status === 'REVIEW' ? { status: 'DUPLICATE' as never } : undefined,
       OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
     }
   } else {
-    // Standaard: actieve werkitems — geen duplicaten/betaald, geen verlopen records
+    // Standaard: actieve werkitems — geen duplicaten, geen verlopen records
     where = {
-      status: { notIn: EXCLUDED_FROM_ACTIVE as never[] },
+      status: { notIn: ['DUPLICATE'] as never[] },
       OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
     }
   }

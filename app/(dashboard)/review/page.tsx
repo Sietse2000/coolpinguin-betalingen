@@ -62,7 +62,7 @@ export default function ReviewPage() {
       const data = await res.json()
       setTotal(data.total ?? 0)
 
-      const txs: Tx[] = (data.transactions ?? []).filter((t: Tx) => t.status !== 'DUPLICATE' && t.status !== 'PAID')
+      const txs: Tx[] = (data.transactions ?? []).filter((t: Tx) => t.status !== 'DUPLICATE')
       const enriched = await Promise.all(
         txs.map(async (tx) => {
           const r = await fetch(`/api/transactions/${tx.id}`)
