@@ -6,6 +6,7 @@ export type TransactionStatus =
   | 'PARTIAL_SUCCESS'
   | 'REJECTED'
   | 'DUPLICATE'
+  | 'PAID'
 
 export type LogStatus = 'SUCCESS' | 'FAILED' | 'PENDING' | 'SKIPPED'
 

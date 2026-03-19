@@ -1,5 +1,9 @@
 import type { InvoiceCache } from '@prisma/client'
-import { extractAllInvoiceNumbers, extractFullInvoiceNumbers } from '@/lib/utils/invoice'
+import {
+  extractAllInvoiceNumbers,
+  extractFullInvoiceNumbers,
+  extractInvoiceNumbersFromInvoiceLines,
+} from '@/lib/utils/invoice'
 
 /**
  * Matching Engine — Coolpinguin Betalingen
@@ -32,6 +36,8 @@ import { extractAllInvoiceNumbers, extractFullInvoiceNumbers } from '@/lib/utils
  * Last4 + uniek + lager bedrag                  | JA   | JA      | NEE
  * Last4 + meerdere matches                      | NEE  | NEE     | NEE  → Review
  * Meerdere volledige nrs + som exact            | JA   | JA      | JA*  (*per factuur)
+ * Meerdere volledige nrs + som > betaald        | NEE  | NEE     | NEE  → Review (PARTIAL)
+ * Meerdere volledige nrs + som < betaald        | NEE  | NEE     | NEE  → Review (OVERPAYMENT)
  * Meerdere verkorte referenties                 | NEE  | NEE     | NEE  → Review
  * Bedrag + naam (geen factuurnr)                | NEE  | NEE     | NEE  → Review
  * Alleen bedrag                                 | NEE  | NEE     | NEE  → Review
@@ -45,12 +51,15 @@ export type DecisionScenario =
   | 'LAST4_EXACT_UNIQUE'      // Auto: unieke last4 + exact bedrag
   | 'LAST4_PARTIAL_UNIQUE'    // Auto: unieke last4 + lager bedrag
   | 'LAST4_MULTIPLE_MATCHES'  // Review: last4 matcht meerdere facturen
-  | 'MULTI_INVOICE_EXACT'     // Auto: meerdere facturen, som exact
-  | 'MULTI_SHORT_REF'         // Review: meerdere verkorte referenties
+  | 'MULTI_INVOICE_EXACT'        // Auto: meerdere facturen, som exact
+  | 'MULTI_INVOICE_PARTIAL'      // Review: som open > betaald bedrag (deelbetaling)
+  | 'MULTI_INVOICE_OVERPAYMENT'  // Review: som open < betaald bedrag (te veel betaald)
+  | 'MULTI_SHORT_REF'            // Review: meerdere verkorte referenties
   | 'AMOUNT_NAME_MATCH'       // Review: bedrag + naam
   | 'AMOUNT_ONLY'             // Review: alleen bedrag
   | 'MULTIPLE_MATCHES'        // Review: ambigue
-  | 'NO_MATCH'                // Review: geen match
+  | 'INVOICE_ALREADY_PAID'    // Duplicaat: factuurnr gevonden, factuur bestaat maar openAmount = 0
+  | 'NO_MATCH'                // Review: factuurnr gevonden maar bestaat niet in RM
   | 'DEBIT_TRANSACTION'       // Skip: uitgaand
 
 export interface AutoDecision {
@@ -76,8 +85,10 @@ export interface EngineResult {
   suggestions: MatchSuggestion[]
   primaryDecision: AutoDecision
   primarySuggestion?: MatchSuggestion
-  /** Ingevuld bij MULTI_INVOICE_EXACT: alle facturen die samen betaald worden */
+  /** Ingevuld bij MULTI_INVOICE_*: alle facturen die samen betaald worden */
   multiInvoiceMatches?: MatchSuggestion[]
+  /** Som van openstaande bedragen bij multi-invoice (voor weergave in UI) */
+  multiInvoiceSum?: number
   /**
    * Het factuurnummer dat gevonden is in de omschrijving, ongeacht of het
    * matcht met een openstaande factuur. Gebruikt door de UI om het veld
@@ -119,21 +130,29 @@ export function runMatchingEngine(
   // Combineer description + bankReference als zoekbron
   const searchText = [description, transaction.bankReference ?? ''].filter(Boolean).join(' ')
 
-  // Extraheer alle nummers (inclusief 5-cijfer → I-conversie)
+  // Extraheer alle factuurnummers (I-prefix) en last4-hints
   const allExtracted = extractAllInvoiceNumbers(searchText)
   // Strikte I+5-digit formaten (voor multi-invoice detectie)
   const fullIds = extractFullInvoiceNumbers(searchText)
   // Alleen I-geprefixte nummers (volledig factuurnummer)
-  const invoiceIds = allExtracted.filter((id) => id.startsWith('I'))
+  let invoiceIds = allExtracted.filter((id) => id.startsWith('I'))
   // Ruwe 4-cijfer nummers (last4-hints)
   const last4Candidates = allExtracted.filter((id) => /^\d{4}$/.test(id))
+
+  // Aanvulling: zoek losse nummers in "Invoice:"-context regels (bijv. "Invoice: 02214")
+  // Deze worden NOOIT gevonden in Kenmerk/Referentie-regels
+  const contextIds = extractInvoiceNumbersFromInvoiceLines(description)
+  for (const id of contextIds) {
+    if (!invoiceIds.includes(id)) invoiceIds = [...invoiceIds, id]
+  }
 
   const extractedInvoiceId = invoiceIds[0] ?? null
 
   // === DEBUG LOG ===
   console.log(
     `[Engine] desc="${description.slice(0, 70).replace(/\n/g, ' ')}"` +
-    ` | gevonden=${JSON.stringify(allExtracted)}` +
+    ` | gevonden=${JSON.stringify(invoiceIds)}` +
+    ` | last4=${JSON.stringify(last4Candidates)}` +
     ` | strategie=${invoiceIds.length > 0 ? 'FACTUURNUMMER_LEIDEND' : last4Candidates.length > 0 ? 'LAST4' : 'FALLBACK'}`
   )
 
@@ -146,7 +165,6 @@ export function runMatchingEngine(
     if (fullIds.length >= 2) {
       const multiResult = tryMultiInvoiceMatch(fullIds, amount, invoices)
       if (multiResult) {
-        console.log(`[Engine] → MULTI_INVOICE_EXACT: ${fullIds.join(' + ')}`)
         return { ...multiResult, extractedInvoiceId }
       }
     }
@@ -168,12 +186,12 @@ export function runMatchingEngine(
 
     const openAmount = parseFloat(matchedInvoice.openAmount.toString())
     if (openAmount <= 0) {
-      const reason = `Factuur ${targetId} heeft geen openstaand saldo — vermoedelijk al betaald`
-      console.log(`[Engine] → NO_MATCH (saldo = 0): ${targetId}`)
+      const reason = `Factuur ${targetId} bestaat in RentMagic maar heeft geen openstaand saldo — al betaald`
+      console.log(`[Engine] → INVOICE_ALREADY_PAID: ${targetId}`)
       return {
         suggestions: [],
         extractedInvoiceId: targetId,
-        primaryDecision: makeDecision('NO_MATCH', false, false, false, reason),
+        primaryDecision: makeDecision('INVOICE_ALREADY_PAID', false, false, false, reason),
       }
     }
 
@@ -254,33 +272,63 @@ function tryMultiInvoiceMatch(
   txAmount: number,
   invoices: InvoiceCache[]
 ): EngineResult | null {
-  const matched: Array<{ invoice: InvoiceCache; openAmount: number }> = []
+  const openMatches: Array<{ invoice: InvoiceCache; openAmount: number }> = []
+  const alreadyPaid: string[] = []
+  const notFound: string[] = []
 
   for (const id of fullIds) {
     const invoice = findInvoiceById(id, invoices)
-    if (!invoice) return null
+    if (!invoice) { notFound.push(id); continue }
     const open = parseFloat(invoice.openAmount.toString())
-    if (open <= 0) return null
-    matched.push({ invoice, openAmount: open })
+    if (open <= 0) { alreadyPaid.push(id) } else { openMatches.push({ invoice, openAmount: open }) }
   }
 
-  const sum = matched.reduce((acc, m) => acc + m.openAmount, 0)
-  if (Math.abs(sum - txAmount) >= AMOUNT_EPSILON) return null
+  // Minder dan 2 openstaande facturen → laat het single-invoice pad het afhandelen
+  if (openMatches.length < 2) return null
 
-  const multiMatches = matched.map(({ invoice, openAmount }) =>
+  const openSum = openMatches.reduce((acc, m) => acc + m.openAmount, 0)
+
+  // Bepaal scenario op basis van som vs betaald bedrag
+  let scenario: DecisionScenario
+  let reviewReason: string | undefined
+
+  if (Math.abs(openSum - txAmount) < AMOUNT_EPSILON) {
+    if (notFound.length > 0 || alreadyPaid.length > 0) {
+      // Som klopt, maar niet alle nummers gevonden/open → review
+      scenario = 'MULTI_INVOICE_EXACT'
+      const issues: string[] = []
+      if (notFound.length) issues.push(`niet in RM: ${notFound.join(', ')}`)
+      if (alreadyPaid.length) issues.push(`al betaald: ${alreadyPaid.join(', ')}`)
+      reviewReason = `Som klopt (€ ${openSum.toFixed(2)}) maar sommige facturen ontbreken — ${issues.join('; ')}`
+    } else {
+      scenario = 'MULTI_INVOICE_EXACT'
+    }
+  } else if (txAmount < openSum - AMOUNT_EPSILON) {
+    scenario = 'MULTI_INVOICE_PARTIAL'
+    reviewReason = `Betaald bedrag € ${txAmount.toFixed(2)} < som open facturen € ${openSum.toFixed(2)} (deelbetaling op ${openMatches.length} facturen)`
+  } else {
+    scenario = 'MULTI_INVOICE_OVERPAYMENT'
+    reviewReason = `Betaald bedrag € ${txAmount.toFixed(2)} > som open facturen € ${openSum.toFixed(2)} (te veel betaald voor ${openMatches.length} facturen)`
+  }
+
+  const isExactAuto = scenario === 'MULTI_INVOICE_EXACT' && !reviewReason
+  console.log(`[Engine] → ${scenario}: ${reviewReason ?? `${openMatches.map((m) => m.invoice.invoiceId).join(' + ')} som=€${openSum.toFixed(2)}`}`)
+
+  const multiMatches = openMatches.map(({ invoice, openAmount }) =>
     makeSuggestion(
       invoice, openAmount, openAmount,
       parseFloat(invoice.totalAmount.toString()),
-      'MULTI_INVOICE_EXACT', 0.99,
+      scenario, isExactAuto ? 0.99 : 0.85,
       `Factuur ${invoice.invoiceId} (€ ${openAmount.toFixed(2)}) onderdeel van gesplitste betaling € ${txAmount.toFixed(2)}`
     )
   )
 
   return {
     suggestions: multiMatches,
-    primaryDecision: makeDecision('MULTI_INVOICE_EXACT', true, true, true),
+    primaryDecision: makeDecision(scenario, isExactAuto, isExactAuto, isExactAuto, reviewReason),
     primarySuggestion: multiMatches[0],
     multiInvoiceMatches: multiMatches,
+    multiInvoiceSum: openSum,
   }
 }
 
@@ -447,6 +495,15 @@ function scenarioToDecision(scenario: DecisionScenario, reason: string): AutoDec
 
     case 'MULTI_INVOICE_EXACT':
       return makeDecision(scenario, true, true, true)
+
+    case 'MULTI_INVOICE_PARTIAL':
+      return makeDecision(scenario, false, false, false, reason)
+
+    case 'MULTI_INVOICE_OVERPAYMENT':
+      return makeDecision(scenario, false, false, false, reason)
+
+    case 'INVOICE_ALREADY_PAID':
+      return makeDecision(scenario, false, false, false, reason)
 
     case 'LAST4_MULTIPLE_MATCHES':
     case 'MULTI_SHORT_REF':

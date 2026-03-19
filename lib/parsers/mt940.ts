@@ -158,9 +158,16 @@ function parseEntry(entry: Mt940Entry): ParsedTransaction | null {
   const extractedInvoice = findInvoiceNumber(description, bankRef?.trim(), information)
   const enrichedDescription = prependInvoice(extractedInvoice, description)
 
+  // Log alle gevonden facturen voor debugging
+  const allFound = description.match(/I\d{4,}/gi) ?? []
+  const effectiveBankRef = bankRef?.trim() !== 'NONREF' ? bankRef?.trim() : (ref86 ?? undefined)
+  console.log(
+    `[MT940] datum=${dateStr} bedrag=${amtStr} | facturen=${JSON.stringify(allFound)} | bankRef="${effectiveBankRef ?? '—'}" | naam="${name ?? '—'}"`
+  )
+
   const raw: ParsedTransaction = {
     hash: '',
-    bankReference: bankRef?.trim() !== 'NONREF' ? bankRef?.trim() : (ref86 ?? undefined),
+    bankReference: effectiveBankRef,
     transactionDate,
     valueDate,
     amount,
@@ -178,8 +185,15 @@ function parseEntry(entry: Mt940Entry): ParsedTransaction | null {
 
 /**
  * Parseer ING :86: structuur.
- * Formaat: /KEY/VALUE/KEY/VALUE/...
+ * Formaat: /KEY/VALUE/KEY/VALUE/... of vrije tekst in REMI.
  * Bekende keys: TRTP, IBAN, BIC, NAME, REMI, EREF, ORDP, BENM, CSID, ISDT
+ *
+ * Ondersteunt ook het gelabelde formaat:
+ *   Naam: Collins Foods NLD Operations B.V.
+ *   Invoice: I02214
+ *   I02224
+ *   I02225
+ *   Kenmerk: 14569/PT1046431
  */
 function parse86(
   info: string,
@@ -187,12 +201,11 @@ function parse86(
 ): { name?: string; iban?: string; description: string; bankRef?: string } {
   const parts: Record<string, string> = {}
 
-  // ING slaat soms /TRTP/ weg en begint direct met de omschrijving
+  // ING /KEY/VALUE/ structuur parsen
   const segments = info.split('/')
   let currentKey = ''
   for (const seg of segments) {
     if (seg === '') continue
-    // Controleer of dit een sleutelwoord is (all caps, max 4 chars)
     if (/^[A-Z]{2,6}$/.test(seg)) {
       currentKey = seg
     } else if (currentKey) {
@@ -200,46 +213,99 @@ function parse86(
     }
   }
 
-  // Tegenpartijnaam: NAME → BENM → ORDP → CDTR → vrije tekst fallback
+  // Fix: /REMI/USTD// of /REMI/STRD// — USTD/STRD zijn REMI sub-type indicatoren, geen echte keys.
+  // In de parser neemt USTD/STRD de currentKey over waardoor parts['REMI'] undefined blijft.
+  // De werkelijke omschrijvingstekst staat dan in parts['USTD'] of parts['STRD'].
+  if (!parts['REMI'] && (parts['USTD'] ?? parts['STRD'])) {
+    parts['REMI'] = parts['USTD'] ?? parts['STRD']
+  }
+
+  // Omschrijving: REMI of vrije tekst
+  const remi =
+    parts['REMI'] ??
+    parts['EREF'] ??
+    (info.replace(/\/[A-Z]{2,6}\//g, ' ').replace(/\s+/g, ' ').trim() || fallback.trim())
+
+  // Kenmerk uit REMI → bankRef (NOOIT als factuurnummer behandelen)
+  const kenmerk = extractLabelValue(remi, /Kenmerk:\s*([^\n\r]+)/i)
+
+  // Tegenpartijnaam: gestructureerde /KEY/ → CNTP (IBAN BIC Naam) → "Naam:"-label → veilige fallback
+  // Kenmerk-waarde wordt NOOIT als naam gebruikt
   const name =
     parts['NAME'] ??
     parts['BENM'] ??
     parts['ORDP'] ??
     parts['CDTR'] ??
+    extractNameFromCntp(parts['CNTP']) ??
+    extractLabelValue(remi, /Naam:\s*([^\n\r]+)/i) ??
     extractNameFallback(info)
 
-  console.log(`[MT940:86] raw="${info.slice(0, 120)}" → name="${name ?? '—'}"`)
-
-  // Omschrijving: REMI of vrije tekst
-  const description =
-    parts['REMI'] ??
-    parts['EREF'] ??
-    (info.replace(/\/[A-Z]{2,6}\//g, ' ').replace(/\s+/g, ' ').trim() ||
-    fallback.trim())
+  // Log voor debugging
+  const invoiceMatches = remi.match(/I\d{4,}/gi) ?? []
+  console.log(
+    `[MT940:86] facturen=${JSON.stringify(invoiceMatches)} | naam="${name ?? '—'}" | kenmerk="${kenmerk ?? '—'}" | remi="${remi.slice(0, 100)}"`
+  )
 
   return {
     name,
     iban: parts['IBAN'],
-    description,
-    bankRef: parts['EREF'],
+    description: remi,
+    bankRef: parts['EREF'] ?? kenmerk,
   }
 }
 
 /**
- * Fallback naam-extractie als geen gestructureerd NAME-veld aanwezig is.
- * Probeert de eerste leesbare tekstregel te vinden die geen IBAN, BIC of getal is.
+ * Extraheer de waarde achter een gelabeld veld (bijv. "Kenmerk:", "Naam:").
+ */
+function extractLabelValue(text: string, pattern: RegExp): string | undefined {
+  const m = text.match(pattern)
+  return m ? m[1].trim() : undefined
+}
+
+/**
+ * Extraheer de klantnaam uit het /CNTP/ veld.
+ * CNTP-formaat (ING): IBAN BIC Naam  (spatie-gescheiden na /-split)
+ * Voorbeeld: "NL70RABO0374482233 RABONL2U Collins Foods NLD Operations B.V."
+ *
+ * MT940 regels worden afgebroken bij ~75 tekens (transport wrapping).
+ * Daardoor kan de IBAN, BIC of naam een \n bevatten — die normaliseren we eerst.
+ */
+function extractNameFromCntp(cntp?: string): string | undefined {
+  if (!cntp) return undefined
+  // Verwijder transport-regelafbrekingen (bijv. "...0224/I\nNGBNL2A/..." → "...0224/INGBNL2A/...")
+  const normalized = cntp.replace(/[\n\r]+/g, '')
+  // Verwijder IBAN (begint met 2 letters + 2 cijfers) en BIC (6-11 alfanumeriek) van het begin
+  const m = normalized.match(/^[A-Z]{2}\d{2}[A-Z0-9]+ [A-Z][A-Z0-9]+ (.+)$/)
+  if (m) return m[1].trim()
+  // Fallback: als er geen IBAN/BIC prefix is, geef de hele waarde terug mits het een naam lijkt
+  return /[a-z]/.test(normalized) ? normalized.trim() : undefined
+}
+
+/**
+ * Veilige naam-fallback: splitst op newlines en slashes.
+ * Slaat regels over die eruitzien als:
+ *   - MT940-sleutelwoorden
+ *   - IBAN / BIC
+ *   - Getallen of referentiecodes (alleen cijfers of alfanumeriek zonder spaties)
+ *   - Factuurregels (I\d{4,}, "Invoice:", "Kenmerk:", "Naam:", "Referentie:")
  */
 function extractNameFallback(info: string): string | undefined {
-  const stripped = info.replace(/\/[A-Z]{2,6}\//g, '/').split('/')
-  for (const seg of stripped) {
-    const s = seg.trim()
-    if (!s) continue
-    if (/^[A-Z]{2,6}$/.test(s)) continue          // sleutelwoord
-    if (/^[A-Z]{2}\d{2}[A-Z0-9]{4}\d/.test(s)) continue // IBAN
-    if (/^[A-Z]{6}[A-Z0-9]{2}/.test(s)) continue  // BIC
-    if (/^\d+([,.]?\d+)?$/.test(s)) continue       // getal
-    if (s.length < 3) continue
-    return s
+  const SKIP = [
+    /^[A-Z]{2,6}$/,                    // MT940 sleutelwoord
+    /^[A-Z]{2}\d{2}[A-Z0-9]{4}\d/,    // IBAN
+    /^[A-Z]{6}[A-Z0-9]{2}/,           // BIC
+    /^\d+([,./][\dA-Z]+)*$/,           // getal of referentiecode (14569/PT1046431)
+    /^I\d{4,}/i,                        // factuurnummer
+    /^(Invoice|Kenmerk|Naam|Referentie|Betalingskenmerk):/i,
+  ]
+  const lines = info.split(/[\n\r]/).flatMap((l) => l.split('/'))
+  for (const line of lines) {
+    const s = line.trim()
+    if (!s || s.length < 3) continue
+    if (SKIP.some((r) => r.test(s))) continue
+    // Namen hebben kleine letters; referentiecodes (bijv. "14569 PT1046431") zijn ALLCAPS
+    if (/[a-z]/.test(s) && /\s/.test(s)) return s
+    // Korte enkelvoudige waarden overslaan (te generiek)
   }
   return undefined
 }

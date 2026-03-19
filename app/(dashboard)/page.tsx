@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import Link from 'next/link'
 import dynamicImport from 'next/dynamic'
+import SyncButton from '@/components/SyncButton'
 
 const DevResetButton = process.env.NODE_ENV === 'development'
   ? dynamicImport(() => import('@/components/DevResetButton'))
@@ -10,13 +11,13 @@ export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
   const now = new Date()
-  // Actieve items: niet verlopen en geen duplicaten
+  // Actieve items: niet verlopen, geen duplicaten, geen al-betaald
   const activeWhere = {
-    status: { notIn: ['DUPLICATE'] as never[] },
+    status: { notIn: ['DUPLICATE', 'PAID'] as never[] },
     OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
   }
 
-  const [counts, recentLogs, partialCount, dupCount] = await Promise.all([
+  const [counts, recentLogs, partialCount, dupCount, paidCount] = await Promise.all([
     db.bankTransaction.groupBy({
       by: ['status'],
       _count: { status: true },
@@ -36,6 +37,7 @@ export default async function DashboardPage() {
       },
     }),
     db.bankTransaction.count({ where: { status: 'DUPLICATE' } }),
+    db.bankTransaction.count({ where: { status: 'PAID' } }),
   ])
 
   const c = Object.fromEntries(counts.map((x) => [x.status, x._count.status]))
@@ -51,9 +53,12 @@ export default async function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           {DevResetButton && <DevResetButton />}
-          <Link href="/upload" className="btn-primary text-base px-5 py-2.5">
-            Bankbestand uploaden
-          </Link>
+          <SyncButton />
+          <div className="flex flex-col items-end gap-1">
+            <Link href="/upload" className="btn-primary text-base px-5 py-2.5">
+              Stap 2 — Bankbestand uploaden
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -77,11 +82,23 @@ export default async function DashboardPage() {
         </Link>
       )}
 
+      {/* Betaalde facturen info */}
+      {paidCount > 0 && (
+        <div className="mb-3 p-3 rounded-lg bg-teal-50 border border-teal-200 flex items-center justify-between text-sm">
+          <span className="text-teal-700">
+            <strong>{paidCount}</strong> transactie{paidCount !== 1 ? 's' : ''} voor al-betaalde facturen — automatisch herkend
+          </span>
+          <Link href="/transactions?status=PAID" className="text-teal-700 underline text-sm">
+            Bekijken
+          </Link>
+        </div>
+      )}
+
       {/* Duplicaten info */}
       {dupCount > 0 && (
         <div className="mb-4 p-3 rounded-lg bg-purple-50 border border-purple-200 flex items-center justify-between text-sm">
           <span className="text-purple-700">
-            <strong>{dupCount}</strong> transactie{dupCount !== 1 ? 's' : ''} herkend als duplicaat — factuur al betaald of al eerder geboekt
+            <strong>{dupCount}</strong> transactie{dupCount !== 1 ? 's' : ''} herkend als duplicaat — eerder al geboekt
           </span>
           <Link href="/transactions?status=DUPLICATE" className="text-purple-700 underline text-sm">
             Bekijken
@@ -110,6 +127,7 @@ export default async function DashboardPage() {
           { label: 'In behandeling',    value: c['PENDING'] ?? 0,          href: '/transactions?status=PENDING',       color: 'border-gray-300 bg-gray-50',     text: 'text-gray-700' },
           { label: 'Afgewezen',         value: c['REJECTED'] ?? 0,         href: '/transactions?status=REJECTED',      color: 'border-red-300 bg-red-50',       text: 'text-red-700' },
           { label: 'Duplicaten',        value: c['DUPLICATE'] ?? 0,        href: '/transactions?status=DUPLICATE',     color: 'border-gray-200 bg-gray-50',     text: 'text-gray-500' },
+          { label: 'Al betaald',        value: paidCount,                  href: '/transactions?status=PAID',          color: 'border-teal-300 bg-teal-50',     text: 'text-teal-700' },
         ].map((s) => (
           <Link key={s.label} href={s.href} className={`card p-5 border-l-4 ${s.color} hover:shadow-md transition-shadow`}>
             <div className={`text-3xl font-medium mb-1 ${s.text}`}>{s.value}</div>

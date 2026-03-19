@@ -8,6 +8,7 @@ const TX_COLORS: Record<TransactionStatus, string> = {
   PARTIAL_SUCCESS:  'bg-orange-100 text-orange-700',
   REJECTED:         'bg-red-100 text-red-700',
   DUPLICATE:        'bg-purple-100 text-purple-700',
+  PAID:             'bg-teal-100 text-teal-700',
 }
 
 const TX_LABELS: Record<TransactionStatus, string> = {
@@ -18,6 +19,7 @@ const TX_LABELS: Record<TransactionStatus, string> = {
   PARTIAL_SUCCESS:  'Deelbetaling',
   REJECTED:         'Afgewezen',
   DUPLICATE:        'Duplicaat',
+  PAID:             'Betaald',
 }
 
 const LOG_COLORS: Record<LogStatus, string> = {
