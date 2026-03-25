@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { deriveStopKey } from '@/lib/ritplanning/stop-key'
 
@@ -579,7 +579,7 @@ const weekCache = new Map<number, { days: DayData[]; vehicles: Vehicle[]; timest
 
 // ─── Hoofdpagina ──────────────────────────────────────────────────────────────
 
-export default function RitplanningPage() {
+function RitplanningPage() {
   const searchParams = useSearchParams()
 
   const [settings, setSettings] = useState<Settings>({
@@ -2248,5 +2248,13 @@ function VehicleRouteCard({
         )
       })()}
     </div>
+  )
+}
+
+export default function RitplanningPageWrapper() {
+  return (
+    <Suspense>
+      <RitplanningPage />
+    </Suspense>
   )
 }
