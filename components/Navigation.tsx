@@ -29,7 +29,7 @@ export default function Navigation() {
   const pathname = usePathname()
 
   return (
-    <nav className="fixed left-0 top-0 h-full w-60 flex flex-col" style={{ backgroundColor: '#2c80b3' }}>
+    <nav className="fixed left-0 top-0 h-full w-60 flex flex-col" style={{ backgroundColor: '#083046' }}>
       {/* Logo */}
       <div className="px-5 py-4 border-b border-white/20">
         <Image
