@@ -29,4 +29,11 @@ export const env = {
   get RENTMAGIC_BASE_URL() { return requireEnv('RENTMAGIC_BASE_URL') },
   get RENTMAGIC_API_KEY() { return requireEnv('RENTMAGIC_API_KEY') },
   get IMPORT_TTL_HOURS() { return parseInt(process.env.IMPORT_TTL_HOURS ?? '2', 10) },
+  // Google OAuth (Ritplanning)
+  get GOOGLE_CLIENT_ID() { return requireEnv('GOOGLE_CLIENT_ID') },
+  get GOOGLE_CLIENT_SECRET() { return requireEnv('GOOGLE_CLIENT_SECRET') },
+  get GOOGLE_REDIRECT_URI() { return process.env.GOOGLE_REDIRECT_URI ?? 'http://localhost:3000/api/auth/google/callback' },
+  // Google Maps (Ritplanning - reistijden)
+  get GOOGLE_MAPS_API_KEY() { return process.env.GOOGLE_MAPS_API_KEY ?? '' },
+  get DEPOT_ADDRESS() { return process.env.DEPOT_ADDRESS ?? 'Rijnsburgerweg 99, 2334 BA Leiden' },
 }

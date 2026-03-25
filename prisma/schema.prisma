@@ -152,3 +152,150 @@ enum LogStatus {
   PENDING
   SKIPPED
 }
+
+// ─── Ritplanning ──────────────────────────────────────────────────────────────
+
+// Opgeslagen Google OAuth token (singleton)
+model GoogleToken {
+  id           String   @id @default("singleton")
+  accessToken  String   @db.Text
+  refreshToken String   @db.Text
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Voertuigen/auto's
+model Vehicle {
+  id           String   @id @default(cuid())
+  name         String
+  licensePlate String?
+  hasTrailer   Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  routes       Route[]
+  createdAt    DateTime @default(now())
+}
+
+// Een planningsdag
+model PlanningDay {
+  id        String         @id @default(cuid())
+  date      DateTime       @db.Date
+  status    PlanningStatus @default(DRAFT)
+  routes    Route[]
+  stops     Stop[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([date])
+}
+
+// Een rit voor één voertuig op een planningsdag
+model Route {
+  id            String      @id @default(cuid())
+  planningDayId String
+  planningDay   PlanningDay @relation(fields: [planningDayId], references: [id], onDelete: Cascade)
+  vehicleId     String
+  vehicle       Vehicle     @relation(fields: [vehicleId], references: [id])
+  driverName    String?
+  stops         Stop[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+// Een stop (order of agenda-afspraak)
+model Stop {
+  id               String      @id @default(cuid())
+  planningDayId    String
+  planningDay      PlanningDay @relation(fields: [planningDayId], references: [id], onDelete: Cascade)
+  routeId          String?
+  route            Route?      @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  type             StopType
+  // RentMagic order
+  rentmagicOrderId String?
+  customerName     String?
+  address          String?
+  // Google Calendar event
+  calendarEventId  String?
+  calendarTitle    String?
+  calendarStart    DateTime?
+  calendarEnd      DateTime?
+  sortOrder        Int         @default(0)
+  notes            String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+}
+
+// Opgeslagen weekplanning (JSON-blob per week)
+// Slaat de volledige route-indeling op inclusief handmatige aanpassingen.
+// knownSourceStops: stops uit RM/agenda bij laatste opslag — voor diff-detectie.
+model RitplanningWeek {
+  id               Int      @id @default(autoincrement())
+  weekStart        String   @unique  // YYYY-MM-DD (eerste dag van het 7-daagse venster)
+  updatedAt        DateTime @updatedAt
+  routesJson       Json     // VehicleRoute[] met volledige stop-data
+  knownSourceStops Json     // { id: string, date: string, name: string }[]
+
+  @@index([weekStart])
+}
+
+// Vaste lijst van bezorgers — beheerd door de planner
+model Driver {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  isActive       Boolean  @default(true)
+  damageFreeKm   Int      @default(0)  // huidige km-streak zonder schade
+  rewardsEarned  Int      @default(0)  // aantal keer €100 beloning ontvangen
+  createdAt      DateTime @default(now())
+}
+
+// Dagregistratie per bezorger: wie reed welke auto, hoeveel km, hoeveel stops
+model DriverSession {
+  id             String   @id @default(cuid())
+  date           String   // YYYY-MM-DD
+  driverName     String
+  vehicleName    String?
+  vehicleId      String?
+  kmDriven       Int?
+  stopsCompleted Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([date, driverName])
+  @@index([driverName])
+  @@index([date])
+}
+
+// Status van een stop zoals gerapporteerd door de bezorger via de tablet
+model StopTracking {
+  id          String     @id @default(cuid())
+  weekStart   String     // YYYY-MM-DD (verwijst naar RitplanningWeek.weekStart)
+  vehicleId   String     // VehicleRoute.vehicleId
+  stopKey     String     // rentmagicOrderId | calendarEventId | "manual:{vehicleId}:{date}:{idx}"
+  status      StopStatus @default(PENDING)
+  startedAt   DateTime?
+  completedAt DateTime?
+  driverNote  String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([weekStart, vehicleId, stopKey])
+  @@index([weekStart])
+}
+
+enum StopStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  SKIPPED
+}
+
+enum PlanningStatus {
+  DRAFT
+  CONFIRMED
+}
+
+enum StopType {
+  PICKUP
+  DELIVERY
+  CALENDAR
+}
