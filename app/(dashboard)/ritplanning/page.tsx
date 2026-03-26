@@ -132,6 +132,16 @@ function localDateStr(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+/** Geeft de maandag van de week waarin `d` valt, verschoven met `offsetWeeks` weken */
+function getWeekMonday(offsetWeeks = 0): Date {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const dow = today.getDay() // 0=zo, 1=ma, ..., 6=za
+  const daysToMonday = dow === 0 ? -6 : 1 - dow
+  const monday = new Date(today)
+  monday.setDate(today.getDate() + daysToMonday + offsetWeeks * 7)
+  return monday
+}
+
 function formatDay(d: Date): string {
   return d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short' })
 }
@@ -637,8 +647,7 @@ function RitplanningPage() {
   /** Sla alle dagen op naar de DB (routesJson bevat stops van alle dagen per voertuig) */
   const savePlan = useCallback(async (offset: number, allDayRoutes: Record<string, VehicleRoute[]>, freshDays: DayData[]) => {
     if (Object.keys(allDayRoutes).length === 0) return
-    const today = new Date(); today.setHours(0, 0, 0, 0)
-    const startDate = new Date(today); startDate.setDate(today.getDate() + offset * 7)
+    const startDate = getWeekMonday(offset)
     const weekStart = localDateStr(startDate)
     const knownSourceStops = buildSourceRefs(freshDays)
 
@@ -716,9 +725,7 @@ function RitplanningPage() {
     if (!confirm('Weet je zeker dat je alle afgevinkte ritten van deze week wilt resetten? Dit kan niet ongedaan gemaakt worden.')) return
     setResettingTracking(true)
     try {
-      const today = new Date(); today.setHours(0, 0, 0, 0)
-      const startDate = new Date(today); startDate.setDate(today.getDate() + weekOffset * 7)
-      const weekStart = localDateStr(startDate)
+      const weekStart = localDateStr(getWeekMonday(weekOffset))
       await fetch(`/api/tablet/tracking?weekStart=${weekStart}`, { method: 'DELETE' })
       setTrackingMap({})
       trackingMapRef.current = {}
@@ -875,9 +882,8 @@ function RitplanningPage() {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
 
-      // Startdatum voor deze week
-      const startDate = new Date(today)
-      startDate.setDate(today.getDate() + offset * 7)
+      // Startdatum altijd de maandag van de betreffende week
+      const startDate = getWeekMonday(offset)
 
       // Cache-TTL: huidige week kort (tab-wissel), andere weken langer
       const ttl = offset === 0 ? CACHE_TTL_CURRENT_MS : CACHE_TTL_OTHER_MS
@@ -885,8 +891,12 @@ function RitplanningPage() {
       if (cached && Date.now() - cached.timestamp < ttl) {
         setDays(cached.days)
         setVehicles(cached.vehicles)
+        const todayStr = localDateStr(today)
+        const todayHasStops = cached.days.find((d) => d.dateStr === todayStr && d.stops.length > 0)
         const firstWithStops = cached.days.find((d) => d.stops.length > 0)
-        const initialDate = firstWithStops?.dateStr ?? localDateStr(startDate)
+        const initialDate = (offset === 0 && todayHasStops ? todayStr : null)
+          ?? firstWithStops?.dateStr
+          ?? localDateStr(startDate)
         setSelectedDate(initialDate)
         const initialDay = cached.days.find((d) => d.dateStr === initialDate)
         if (initialDay) {
@@ -1014,8 +1024,12 @@ function RitplanningPage() {
       }
 
       // Selecteer eerste dag met stops, anders eerste dag van de week
+      const todayStr = localDateStr(today)
+      const todayHasStops = dayDataList.find((d) => d.dateStr === todayStr && d.stops.length > 0)
       const firstWithStops = dayDataList.find((d) => d.stops.length > 0)
-      const initialDate = firstWithStops?.dateStr ?? localDateStr(startDate)
+      const initialDate = (offset === 0 && todayHasStops ? todayStr : null)
+        ?? firstWithStops?.dateStr
+        ?? localDateStr(startDate)
       setSelectedDate(initialDate)
 
       const initialDay = dayDataList.find((d) => d.dateStr === initialDate)
@@ -1205,8 +1219,7 @@ function RitplanningPage() {
 
       {/* Week-navigator */}
       {(() => {
-        const today = new Date(); today.setHours(0, 0, 0, 0)
-        const weekStart = new Date(today); weekStart.setDate(today.getDate() + weekOffset * 7)
+        const weekStart = getWeekMonday(weekOffset)
         const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6)
         const weekLabel = weekOffset === 0
           ? 'Deze week'
@@ -1224,7 +1237,7 @@ function RitplanningPage() {
             >←</button>
             <div className="flex items-center gap-1">
               {[0, 1, 2, 3, 4].map((o) => {
-                const ws = new Date(today); ws.setDate(today.getDate() + o * 7)
+                const ws = getWeekMonday(o)
                 const cached = weekCache.has(o)
                 return (
                   <button
@@ -2033,7 +2046,11 @@ function VehicleRouteCard({
                 <div key={stop.rentmagicOrderId ?? stop.calendarEventId ?? sn} className="flex gap-3 items-stretch">
                   {/* Tijdlijn kolom */}
                   <div className="flex flex-col items-center w-7 shrink-0">
-                    <div className="w-0.5 bg-gray-200 flex-none" style={{ height: '0.5rem' }} />
+                    {isInProgress ? (
+                      <div className="text-3xl leading-none animate-bus-arrive select-none" title="Bezig">🚌</div>
+                    ) : (
+                      <div className="w-0.5 bg-gray-200 flex-none" style={{ height: '0.5rem' }} />
+                    )}
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0 ${dotColor}`}>
                       {isDone ? '✓' : sn}
                     </div>

@@ -8,6 +8,16 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      keyframes: {
+        'bus-arrive': {
+          '0%':   { transform: 'translateY(-16px)', opacity: '0' },
+          '60%':  { transform: 'translateY(3px)',   opacity: '1' },
+          '100%': { transform: 'translateY(0)',      opacity: '1' },
+        },
+      },
+      animation: {
+        'bus-arrive': 'bus-arrive 0.45s ease-out',
+      },
       fontFamily: {
         sans: ['var(--font-ubuntu)', 'Ubuntu', 'sans-serif'],
       },
