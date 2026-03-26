@@ -152,7 +152,7 @@ export default function TabletPage() {
   const loadedDateRef = useRef<string>('')                 // bijhouden voor welke datum de state geladen is
   const [recentNames, setRecentNames] = useState<string[]>([])
 
-  const [testMode, setTestMode] = useState(false)
+  const [testMode, setTestMode] = useState(true) // TODO: terugzetten naar false na testen
 
   // Dag afsluiten
   const [showCloseDay, setShowCloseDay] = useState(false)
