@@ -58,11 +58,18 @@ export default function ReviewPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/transactions?status=REVIEW&limit=100')
-      const data = await res.json()
-      setTotal(data.total ?? 0)
+      const [r1, r2] = await Promise.all([
+        fetch('/api/transactions?status=REVIEW&limit=100'),
+        fetch('/api/transactions?status=PENDING&limit=100'),
+      ])
+      const [d1, d2] = await Promise.all([r1.json(), r2.json()])
 
-      const txs: Tx[] = (data.transactions ?? []).filter((t: Tx) => t.status !== 'DUPLICATE')
+      const txs: Tx[] = [
+        ...(d1.transactions ?? []),
+        ...(d2.transactions ?? []),
+      ].filter((t: Tx) => t.status !== 'DUPLICATE')
+      setTotal(txs.length)
+
       const enriched = await Promise.all(
         txs.map(async (tx) => {
           const r = await fetch(`/api/transactions/${tx.id}`)
@@ -135,6 +142,10 @@ export default function ReviewPage() {
       if (!res.ok) throw new Error(data.error ?? 'Koppelen mislukt')
       notify(`Gekoppeld aan ${invoiceId}. Gebruik "Goedkeuren" om te verwerken.`, 'ok')
       await load()
+      setSelected(prev => prev ? {
+        ...prev,
+        transaction: { ...prev.transaction, matchedInvoiceId: invoiceId, status: 'REVIEW' },
+      } : null)
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Fout', 'err')
     } finally {

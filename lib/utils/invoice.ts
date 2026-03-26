@@ -7,6 +7,7 @@
  *   "I02230"               → "I02230"   (direct herkend)
  *   "USTDI02230"           → "I02230"   (aaneengeplakt, geen \b voor I vereist)
  *   "UST+D+I02230"         → "I02230"   (plustekens als scheidingsteken)
+ *   "102028"               → "I02028"   ("1" als verwisseld met "I", 6 cijfers)
  *   "betaling 2230"        → "2230"     (4 cijfers: last4-hint, geen I-prefix)
  *
  * NIET meer ondersteund (te veel false positives met Kenmerk/Referentie getallen):
@@ -24,6 +25,8 @@ function normalize(text: string): string {
  * Prioriteit:
  * 1. I + exact 5 cijfers, ook aaneengeplakt (USTDI02230 → I02230)
  * 2. I + 3–8 cijfers met woordgrens (niet-standaard formaten)
+ * 2.5. "1" als verwisseld met "I": los 6-cijferig getal "1XXXXX" → I + 5 cijfers
+ *      (bijv. "102028" → I02028). Alleen als geen I-prefix gevonden.
  * 3. Losse 4 cijfers → rauw (last4-hint, geen conversie)
  *
  * Stap 3 (losse 5 cijfers → I-prefix) is verwijderd: "14569" uit
@@ -40,6 +43,11 @@ export function extractInvoiceNumber(description: string): string | null {
   // Stap 2: I + 3–8 cijfers met woordgrens
   const loose = n.match(/\bI(\d{3,8})\b/)
   if (loose) return `I${loose[1]}`
+
+  // Stap 2.5: "1" verwisseld met "I" — bijv. "102028" → I02028
+  // Alleen los 6-cijferig getal met leading "1" (woordgrens aan beide kanten)
+  const oneForI = n.match(/\b1(\d{5})\b/)
+  if (oneForI) return `I${oneForI[1]}`
 
   // Stap 3: losse 4 cijfers → geef rauw terug voor last4-matching
   const fourDigits = n.match(/\b(\d{4})\b/)
@@ -58,12 +66,21 @@ export function extractFullInvoiceNumbers(description: string): string[] {
   const n = normalize(description)
   const results: string[] = []
   const seen = new Set<string>()
-  const pattern = /I(\d{5})(?!\d)/g
   let m: RegExpExecArray | null
+
+  const pattern = /I(\d{5})(?!\d)/g
   while ((m = pattern.exec(n)) !== null) {
     const id = `I${m[1]}`
     if (!seen.has(id)) { seen.add(id); results.push(id) }
   }
+
+  // "1" als verwisseld met "I" — los 6-cijferig getal "1XXXXX" → I + 5 cijfers
+  const oneForI = /\b1(\d{5})\b/g
+  while ((m = oneForI.exec(n)) !== null) {
+    const id = `I${m[1]}`
+    if (!seen.has(id)) { seen.add(id); results.push(id) }
+  }
+
   return results
 }
 
@@ -88,6 +105,14 @@ export function extractAllInvoiceNumbers(description: string): string[] {
   // Prioriteit 1: I + cijfers (ook aaneengeplakt, bijv. USTDI02230)
   const iPattern = /I(\d{3,8})(?!\d)/g
   while ((m = iPattern.exec(n)) !== null) {
+    const id = `I${m[1]}`
+    if (!seen.has(id)) { seen.add(id); results.push(id) }
+  }
+
+  // Prioriteit 1.5: "1" als verwisseld met "I" — los 6-cijferig getal "1XXXXX" → I + 5 cijfers
+  // Alleen als het nummer nog niet gevonden is via de I-prefix
+  const oneForIPattern = /\b1(\d{5})\b/g
+  while ((m = oneForIPattern.exec(n)) !== null) {
     const id = `I${m[1]}`
     if (!seen.has(id)) { seen.add(id); results.push(id) }
   }

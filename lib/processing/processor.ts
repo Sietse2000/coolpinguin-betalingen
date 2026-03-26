@@ -1,5 +1,4 @@
 import { db } from '@/lib/db'
-import { processPayment } from '@/lib/rentmagic/client'
 import { auditLog } from '@/lib/utils/audit'
 import { checkDuplicate } from '@/lib/duplicate/detector'
 import type { AutoDecision } from '@/lib/matching/engine'
@@ -61,16 +60,26 @@ export async function processTransaction(
 
   // Label bepalen: als decision meegegeven → gebruik die. Anders (handmatig) → vergelijk
   // transactiebedrag met openstaand saldo in de cache. Label alleen als saldo na betaling = 0.
+  // Bij overpayment (tx.amount > open): boek het open saldo (niet het tx-bedrag) zodat RM niet
+  // afwijst en het label wél gezet kan worden.
   let shouldSetLabel: boolean
+  let amount: number
   if (decision) {
     shouldSetLabel = decision.setLabel
+    amount = parseFloat(tx.amount.toString())
   } else {
     const inv = await db.invoiceCache.findUnique({ where: { invoiceId }, select: { openAmount: true } })
     const open = inv ? parseFloat(inv.openAmount.toString()) : null
-    shouldSetLabel = open !== null && Math.abs(parseFloat(tx.amount.toString()) - open) < 0.005
+    const txAmount = parseFloat(tx.amount.toString())
+    if (open !== null && txAmount > open + 0.005) {
+      // Overpayment: boek alleen het open saldo
+      amount = open
+      shouldSetLabel = true
+    } else {
+      amount = txAmount
+      shouldSetLabel = open !== null && Math.abs(txAmount - open) < 0.005
+    }
   }
-
-  const amount = parseFloat(tx.amount.toString())
 
   await auditLog({
     action: 'PROCESS_START',
@@ -211,7 +220,9 @@ async function processPaymentWithDecision(
       const b = body as Record<string, unknown>
       paymentId = String(b?.ID ?? b?.PaymentID ?? b?.id ?? '') || undefined
     } else {
-      paymentErr = `Payment POST mislukt: HTTP ${res.status}`
+      const b = body as Record<string, unknown>
+      const rmMsg = b?.Message ?? b?.message ?? b?.error ?? b?.Error ?? b?._raw ?? ''
+      paymentErr = `Payment POST mislukt: HTTP ${res.status}${rmMsg ? ` — ${rmMsg}` : ''}`
     }
   } catch (err) {
     paymentErr = err instanceof Error ? err.message : String(err)
