@@ -152,6 +152,8 @@ export default function TabletPage() {
   const loadedDateRef = useRef<string>('')                 // bijhouden voor welke datum de state geladen is
   const [recentNames, setRecentNames] = useState<string[]>([])
 
+  const [testMode, setTestMode] = useState(false)
+
   // Dag afsluiten
   const [showCloseDay, setShowCloseDay] = useState(false)
   const [kmInput, setKmInput] = useState('')
@@ -279,7 +281,7 @@ export default function TabletPage() {
 
   const allStopsDone = !!activeRoute && activeRoute.stops.length > 0 && activeRoute.stops.every((s) => s.tracking?.status === 'DONE' || s.tracking?.status === 'SKIPPED')
 
-  const isToday = date === todayStr()
+  const isToday = date === todayStr() || testMode
 
   // Alleen de echte stops (geen depot/koppeling) in volgorde, voor de volgorde-check
   const scheduledStops = useMemo(
@@ -309,9 +311,18 @@ export default function TabletPage() {
             className="bg-white/10 border border-white/20 text-white text-sm rounded px-3 py-1.5 ml-1"
           />
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-blue-200">
-          <span className="w-2 h-2 rounded-full bg-[#01b902] animate-pulse inline-block" />
-          {lastRefresh && fmtIso(lastRefresh.toISOString())}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setTestMode((v) => !v)}
+            className={`text-xs px-2 py-1 rounded border transition-all ${testMode ? 'bg-orange-500 border-orange-400 text-white' : 'border-white/20 text-white/40 hover:text-white/70'}`}
+            title="Testmodus: afvinken ook op andere datums"
+          >
+            {testMode ? 'TEST AAN' : 'TEST'}
+          </button>
+          <div className="flex items-center gap-1.5 text-xs text-blue-200">
+            <span className="w-2 h-2 rounded-full bg-[#01b902] animate-pulse inline-block" />
+            {lastRefresh && fmtIso(lastRefresh.toISOString())}
+          </div>
         </div>
       </div>
 
