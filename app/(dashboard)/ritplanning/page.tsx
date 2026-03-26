@@ -581,6 +581,8 @@ function mergeRoutesWithFresh(
         if (!id) return stop               // handmatige taak → altijd bewaren
         const fresh = freshById.get(id)
         if (!fresh) {
+          // Calendar stops bewaren ook als Google niet beschikbaar is (fresh data is leeg)
+          if (stop.type === 'CALENDAR') return stop
           // Niet meer in RentMagic — bewaar als al bezorgd (DONE), anders verwijderen
           return completedIds.has(id) ? stop : null
         }
