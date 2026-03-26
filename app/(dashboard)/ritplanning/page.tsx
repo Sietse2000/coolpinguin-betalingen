@@ -1026,8 +1026,11 @@ function RitplanningPage() {
       }
 
       // Selecteer eerste dag met stops, anders eerste dag van de week
+      // Check ook opgeslagen routes (bijv. calendar stops zonder verse RM-orders)
       const todayStr = localDateStr(today)
-      const todayHasStops = dayDataList.find((d) => d.dateStr === todayStr && d.stops.length > 0)
+      const todayHasFreshStops = dayDataList.find((d) => d.dateStr === todayStr && d.stops.length > 0)
+      const todayHasSavedRoutes = allDayRoutesRef.current[todayStr]?.some((r) => r.stops.length > 0)
+      const todayHasStops = todayHasFreshStops || todayHasSavedRoutes
       const firstWithStops = dayDataList.find((d) => d.stops.length > 0)
       const initialDate = (offset === 0 && todayHasStops ? todayStr : null)
         ?? firstWithStops?.dateStr

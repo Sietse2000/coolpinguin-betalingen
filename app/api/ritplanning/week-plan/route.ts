@@ -13,16 +13,19 @@ export async function GET(req: NextRequest) {
     const exact = await db.ritplanningWeek.findUnique({ where: { weekStart } })
     if (exact) return NextResponse.json({ plan: exact })
 
-    // Stap 2: flexibele match — vind plan waarvan venster de gevraagde datum omvat
+    // Stap 2: flexibele match — vind plan waarvan 7-daags venster overlapt met de gevraagde week
+    // (plan kan midden in de week zijn opgeslagen, bijv. weekStart=donderdag terwijl dashboard vraagt om maandag)
     const allPlans = await db.ritplanningWeek.findMany({
       orderBy: { weekStart: 'desc' },
       take: 10,
     })
-    const target = new Date(weekStart)
+    const reqStart = new Date(weekStart)
+    const reqEnd = new Date(reqStart); reqEnd.setDate(reqStart.getDate() + 6)
     const plan = allPlans.find((p) => {
-      const start = new Date(p.weekStart)
-      const end = new Date(start); end.setDate(start.getDate() + 6)
-      return target >= start && target <= end
+      const planStart = new Date(p.weekStart)
+      const planEnd = new Date(planStart); planEnd.setDate(planStart.getDate() + 6)
+      // Overlap: planStart <= reqEnd AND planEnd >= reqStart
+      return planStart <= reqEnd && planEnd >= reqStart
     }) ?? null
 
     return NextResponse.json({ plan })
