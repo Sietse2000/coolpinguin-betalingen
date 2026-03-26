@@ -1170,7 +1170,7 @@ function RitplanningPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="page-title">Ritplanning</h1>
+          <h1 className="page-title">PinguinPlanner</h1>
           <p className="page-sub">7-daags overzicht — automatische indeling per bezorger</p>
         </div>
         <div className="flex items-center gap-3">

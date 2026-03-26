@@ -300,7 +300,7 @@ export default function TabletPage() {
       <div className="bg-[#083046] px-5 py-3 flex items-center justify-between shadow-lg">
         <div className="flex items-center gap-3">
           <div>
-            <div className="text-white font-bold text-xl tracking-tight">Ritplanning</div>
+            <div className="text-white font-bold text-xl tracking-tight">PinguinPlanner</div>
             <div className="text-blue-200 text-xs mt-0.5">
               {new Date(date + 'T12:00:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}
             </div>
@@ -332,7 +332,7 @@ export default function TabletPage() {
           onClick={() => setTabView('ritten')}
           className={`flex-1 py-3 text-sm font-semibold transition-colors border-b-2 ${tabView === 'ritten' ? 'border-[#2c80b3] text-[#2c80b3]' : 'border-transparent text-gray-500 hover:text-[#083046]'}`}
         >
-          🚚 Mijn ritten
+          🐧 Mijn ritten
         </button>
         <button
           onClick={() => { setTabView('leaderboard'); loadLeaderboard() }}
@@ -366,7 +366,7 @@ export default function TabletPage() {
 
           {/* Header met prijsbord */}
           <div className="px-5 pt-8 pb-6 text-center">
-            <div className="text-3xl font-black text-white tracking-widest mb-5 uppercase" style={{ letterSpacing: '0.2em' }}>🎰 Bezorgers Challenge</div>
+            <div className="text-3xl font-black text-white tracking-widest mb-5 uppercase" style={{ letterSpacing: '0.2em' }}>🐧 PinguinPlanner Challenge</div>
 
             {/* Altijd zichtbaar prijsbord */}
             <div className="relative inline-flex items-center justify-center mx-auto mb-3">
@@ -729,7 +729,7 @@ export default function TabletPage() {
                           <div key={`depot-${idx}`} className="flex gap-3 items-stretch">
                             <div className="flex flex-col items-center w-10 shrink-0">
                               <div className={`w-0.5 flex-1 ${isKasten ? 'bg-teal-200' : 'bg-amber-200'}`} />
-                              <span className="text-xl my-1">📦</span>
+                              <span className="text-xl my-1">🚛</span>
                               <div className={`w-0.5 flex-1 ${isKasten ? 'bg-teal-200' : 'bg-amber-200'}`} />
                             </div>
                             <div className={`flex-1 my-2 flex items-center gap-3 border rounded-xl px-4 py-3 text-sm ${isKasten ? 'bg-teal-50 border-teal-200 text-teal-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>

@@ -10,8 +10,8 @@ const ubuntu = Ubuntu({
 })
 
 export const metadata: Metadata = {
-  title: 'Coolpinguin – Betalingen',
-  description: 'Coolpinguin – Bankbetalingen matchen aan openstaande facturen in RentMagic',
+  title: 'PinguinPlanner',
+  description: 'PinguinPlanner – Ritplanning en betalingen voor Coolpinguin',
   robots: { index: false, follow: false },
 }
 
