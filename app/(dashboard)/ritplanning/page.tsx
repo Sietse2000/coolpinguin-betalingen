@@ -73,6 +73,7 @@ interface VehicleRoute {
   stops: UnifiedStop[]
   workStart: number
   workEnd: number
+  totalKm?: number            // Berekende routeafstand (km) via Google Maps
 }
 
 interface DayData {
@@ -150,6 +151,19 @@ function addMinutes(d: Date, min: number): Date {
 function calcMinVehicles(count: number, s: Settings): number {
   if (count === 0) return 0
   return Math.ceil((count * (s.handlingMin + s.travelMin)) / (s.workdayHours * 60))
+}
+
+/** Berekent totale routeafstand (km) op basis van stop-volgorde en afstandsparen van Google Maps. */
+function calcRouteKm(stops: UnifiedStop[], distancePairs: Record<string, number>, depotAddress: string): number | undefined {
+  if (stops.length === 0 || !depotAddress || Object.keys(distancePairs).length === 0) return undefined
+  const addresses = [depotAddress, ...stops.map((s) => s.address), depotAddress]
+  let total = 0
+  for (let i = 0; i < addresses.length - 1; i++) {
+    const km = distancePairs[`${addresses[i]}|${addresses[i + 1]}`]
+    if (km === undefined) return undefined // niet alle paren beschikbaar — wacht op volledige data
+    total += km
+  }
+  return Math.round(total)
 }
 
 function trailerIcon(type: TrailerType): string {
@@ -594,6 +608,7 @@ function RitplanningPage() {
   const [drivers, setDrivers] = useState<{ id: string; name: string; damageFreeKm: number; rewardsEarned: number }[]>([])
   const [newDriverName, setNewDriverName] = useState('')
   const [driverSaving, setDriverSaving] = useState(false)
+  const [resettingTracking, setResettingTracking] = useState(false)
   const [weekOffset, setWeekOffset] = useState(0)
   const [days, setDays] = useState<DayData[]>([])
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
@@ -653,7 +668,12 @@ function RitplanningPage() {
   // Auto-save met 2s debounce — sync editRoutes naar allDayRoutesRef, dan opslaan
   useEffect(() => {
     if (editRoutes.length === 0 || !selectedDate) return
-    allDayRoutesRef.current = { ...allDayRoutesRef.current, [selectedDate]: editRoutes }
+    // Bereken totalKm per route op basis van Google Maps afstandsdata
+    const routesWithKm = editRoutes.map((r) => ({
+      ...r,
+      totalKm: calcRouteKm(r.stops, distancePairsRef.current, depotAddressRef.current) ?? r.totalKm,
+    }))
+    allDayRoutesRef.current = { ...allDayRoutesRef.current, [selectedDate]: routesWithKm }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       savePlan(weekOffsetRef.current, allDayRoutesRef.current, freshDaysRef.current)
@@ -692,6 +712,21 @@ function RitplanningPage() {
     return () => clearInterval(id)
   }, [weekOffset]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function resetTrackingForWeek() {
+    if (!confirm('Weet je zeker dat je alle afgevinkte ritten van deze week wilt resetten? Dit kan niet ongedaan gemaakt worden.')) return
+    setResettingTracking(true)
+    try {
+      const today = new Date(); today.setHours(0, 0, 0, 0)
+      const startDate = new Date(today); startDate.setDate(today.getDate() + weekOffset * 7)
+      const weekStart = localDateStr(startDate)
+      await fetch(`/api/tablet/tracking?weekStart=${weekStart}`, { method: 'DELETE' })
+      setTrackingMap({})
+      trackingMapRef.current = {}
+    } finally {
+      setResettingTracking(false)
+    }
+  }
+
   function updateStop(routeIdx: number, stopIdx: number, updates: Partial<UnifiedStop>) {
     setEditRoutes((prev) => prev.map((r, ri) => {
       if (ri !== routeIdx) return r
@@ -714,9 +749,12 @@ function RitplanningPage() {
     }))
   }
 
-  // Echte rijtijden (Google Maps Distance Matrix) — gedeeld over alle routes
+  // Echte rijtijden + afstanden (Google Maps Distance Matrix) — gedeeld over alle routes
   const [travelPairs, setTravelPairs] = useState<TravelPairs>({})
+  const [distancePairs, setDistancePairs] = useState<Record<string, number>>({})
+  const distancePairsRef = useRef<Record<string, number>>({})
   const [depotAddress, setDepotAddress] = useState<string>('')
+  const depotAddressRef = useRef<string>('')
 
   // Voertuig toevoegen
   const [showAddVehicle, setShowAddVehicle] = useState(false)
@@ -752,10 +790,17 @@ function RitplanningPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ addresses: unique }),
       })
-      const data = await res.json() as { depot: string; pairs: TravelPairs }
-      if (data.depot) setDepotAddress(data.depot)
+      const data = await res.json() as { depot: string; pairs: TravelPairs; distancePairs: Record<string, number> }
+      if (data.depot) { setDepotAddress(data.depot); depotAddressRef.current = data.depot }
       if (data.pairs && Object.keys(data.pairs).length > 0) {
         setTravelPairs((prev) => ({ ...prev, ...data.pairs }))
+      }
+      if (data.distancePairs && Object.keys(data.distancePairs).length > 0) {
+        setDistancePairs((prev) => {
+          const merged = { ...prev, ...data.distancePairs }
+          distancePairsRef.current = merged
+          return merged
+        })
       }
     } catch {
       // Silently fall back to fixed travelMin
@@ -792,7 +837,7 @@ function RitplanningPage() {
     setDrivers(data.drivers ?? [])
   }
 
-  async function driverAction(id: string, action: 'damage' | 'claim_reward') {
+  async function driverAction(id: string, action: 'damage_reported' | 'damage_unreported' | 'claim_reward') {
     await fetch('/api/drivers', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -1141,6 +1186,16 @@ function RitplanningPage() {
           >
             ⚙ Instellingen
           </button>
+          {Object.keys(trackingMap).length > 0 && (
+            <button
+              onClick={resetTrackingForWeek}
+              disabled={resettingTracking}
+              className="text-sm text-orange-500 hover:text-orange-700 px-3 py-2 border border-orange-200 rounded disabled:opacity-50"
+              title="Testmodus: zet alle afgevinkte ritten van deze week terug naar beschikbaar"
+            >
+              {resettingTracking ? 'Resetten…' : '↺ Reset ritten'}
+            </button>
+          )}
           {saving && <span className="text-xs text-gray-400">Opslaan…</span>}
           <button onClick={() => { weekCache.delete(weekOffset); loadData(weekOffset) }} disabled={loading} className="btn-primary px-4 py-2 text-sm">
             {loading ? 'Laden…' : '↻ Laad planning'}
@@ -1303,10 +1358,18 @@ function RitplanningPage() {
                           </button>
                         )}
                         <button
-                          onClick={() => { if (confirm(`Schade melden voor ${d.name}? Dit reset de schadevrije teller naar 0.`)) driverAction(d.id, 'damage') }}
-                          className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 px-2 py-1 rounded"
+                          onClick={() => { if (confirm(`Schade GEMELD voor ${d.name}.\n\nDe bezorger behoudt max 500 km (huidige stand: ${d.damageFreeKm} km).`)) driverAction(d.id, 'damage_reported') }}
+                          className="text-xs text-orange-500 hover:text-orange-700 border border-orange-200 hover:border-orange-300 px-2 py-1 rounded"
+                          title="Schade is gemeld → teller gaat terug naar max 500 km"
                         >
-                          ⚠ Schade
+                          ⚠ Gemeld
+                        </button>
+                        <button
+                          onClick={() => { if (confirm(`Schade NIET GEMELD voor ${d.name}.\n\nDe schadevrije teller wordt gereset naar 0!`)) driverAction(d.id, 'damage_unreported') }}
+                          className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-300 px-2 py-1 rounded"
+                          title="Schade niet gemeld → teller gereset naar 0"
+                        >
+                          ✕ Niet gemeld
                         </button>
                         <button
                           onClick={() => deleteDriver(d.id)}
@@ -1726,6 +1789,8 @@ function VehicleRouteCard({
 
   // Bereken welke stops over hun geplande tijd lopen (voor waarschuwing op planningspagina)
   const overdueStopKeys = useMemo(() => {
+    // Overdue-detectie alleen zinvol voor vandaag — toekomstige stops kunnen nooit overdue zijn
+    if (dateStr !== localDateStr(new Date())) return new Set<string>()
     const now = Date.now()
     const overdue = new Set<string>()
     route.stops.forEach((stop, idx) => {
@@ -1883,8 +1948,15 @@ function VehicleRouteCard({
               <span>Vertrek vanaf zaak</span>
               <span className="font-medium text-gray-500">
                 {(() => {
-                  const depMin = route.workStart * 60 + settings.departureBufferMin
-                  return `${String(Math.floor(depMin / 60)).padStart(2, '0')}:${String(depMin % 60).padStart(2, '0')}`
+                  const currentDepMin = route.workStart * 60 + settings.departureBufferMin
+                  if (!returnEndTime) {
+                    return `${String(Math.floor(currentDepMin / 60)).padStart(2, '0')}:${String(currentDepMin % 60).padStart(2, '0')}`
+                  }
+                  const returnEndMin = returnEndTime.getHours() * 60 + returnEndTime.getMinutes()
+                  const routeDuration = returnEndMin - currentDepMin
+                  const bufferedDuration = Math.ceil(routeDuration * 1.15)
+                  const latestDep = Math.max(route.workEnd * 60 - bufferedDuration, 8 * 60 + 10)
+                  return `${String(Math.floor(latestDep / 60)).padStart(2, '0')}:${String(latestDep % 60).padStart(2, '0')}`
                 })()}
               </span>
             </div>
@@ -1942,8 +2014,6 @@ function VehicleRouteCard({
               // Bepaal wat er NA deze stop volgt (direct door of terug naar zaak of niets)
               const nextItem = schedule[idx + 1]
               const isLast = !nextItem
-              const nextIsDirect = nextItem && !('isDepotReturn' in nextItem) && !('isCoupling' in nextItem)
-
               const stopKey = deriveStopKey(stop, vehicleId, dateStr, pos)
               const tracking = trackingMap[stopKey]
               const trackStatus = tracking?.status
@@ -1987,7 +2057,7 @@ function VehicleRouteCard({
                           <span className="text-xs px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">Bezig</span>
                         )}
                         {isOverdue && (
-                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium animate-pulse">⚠ Loopt uit</span>
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium animate-pulse">⚠ Duurt lang</span>
                         )}
                         {isDone && (
                           <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Afgerond</span>
@@ -2139,11 +2209,6 @@ function VehicleRouteCard({
                 </div>
               )
 
-              // Direct-doorrijden connector wordt getoond als de VOLGENDE item een reguliere stop is
-              // (geen depot of koppeling) — dit loopt via het nextIsDirect-vlagje in de kaart zelf,
-              // maar we tonen het via de tijdlijnlijn (al gedekt door de doorlopende grijze lijn)
-              // Extra label "direct doorrijden" alleen als dit nuttige info is
-              void nextIsDirect // gebruikt via de lijn-doortrekking
             })}
 
             {/* Eindpunt */}

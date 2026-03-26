@@ -35,6 +35,7 @@ interface TabletRoute {
   workStart: number
   workEnd: number
   stops: TabletStop[]
+  totalKm?: number  // Berekend door planner via Google Maps
 }
 
 interface LeaderboardEntry {
@@ -161,6 +162,7 @@ export default function TabletPage() {
   // Leaderboard
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+  const [showSpelregels, setShowSpelregels] = useState(false)
 
   const load = useCallback(async () => {
     // Bij datumwissel: reset gewiste namen zodat DB-waarden van nieuwe datum gewoon hersteld worden
@@ -240,7 +242,7 @@ export default function TabletPage() {
         driverName: driverNameForClose.trim(),
         vehicleName: activeRoute?.assignedVehicleName ?? null,
         vehicleId: activeRoute?.vehicleId ?? null,
-        kmDriven: kmInput ? parseInt(kmInput) : null,
+        kmDriven: activeRoute?.totalKm ?? (kmInput ? parseInt(kmInput) : null),
         stopsCompleted,
       }),
     })
@@ -276,6 +278,14 @@ export default function TabletPage() {
   }, [activeRoute, date])
 
   const allStopsDone = !!activeRoute && activeRoute.stops.length > 0 && activeRoute.stops.every((s) => s.tracking?.status === 'DONE' || s.tracking?.status === 'SKIPPED')
+
+  const isToday = date === todayStr()
+
+  // Alleen de echte stops (geen depot/koppeling) in volgorde, voor de volgorde-check
+  const scheduledStops = useMemo(
+    () => schedule.filter((item): item is ScheduledStop => !('isDepotReturn' in item) && !('isCoupling' in item)),
+    [schedule]
+  )
 
   if (loading) {
     return <div className="flex items-center justify-center min-h-screen bg-gray-50 text-[#083046] text-xl font-medium">Laden…</div>
@@ -377,6 +387,38 @@ export default function TabletPage() {
             <p className="text-xs mt-8" style={{ color: '#7c6fa0' }}>
               Rijd <span className="text-purple-300 font-bold">{(leaderboard[0]?.rewardKm ?? 4000).toLocaleString('nl-NL')} km</span> schadevrij en win!
             </p>
+
+            {/* Spelregels */}
+            <button
+              onClick={() => setShowSpelregels((v) => !v)}
+              className="mt-4 text-xs px-4 py-2 rounded-full border transition-all"
+              style={{ borderColor: '#3d2f6a', color: '#a78bfa', background: showSpelregels ? '#1e1340' : 'transparent' }}
+            >
+              {showSpelregels ? '▲ Spelregels verbergen' : '▼ Spelregels bekijken'}
+            </button>
+
+            {showSpelregels && (
+              <div className="mt-4 mx-auto max-w-sm text-left rounded-2xl px-5 py-4 text-sm space-y-3"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid #2a1f50' }}>
+                <div className="text-purple-300 font-bold text-base mb-1">Spelregels</div>
+                <div className="flex gap-3 items-start">
+                  <span className="text-xl shrink-0">🎯</span>
+                  <p style={{ color: '#c4b5fd' }}>Rijd <strong className="text-white">{(leaderboard[0]?.rewardKm ?? 4000).toLocaleString('nl-NL')} km</strong> schadevrij en ontvang <strong className="text-yellow-300">€{leaderboard[0]?.rewardEur ?? 100}</strong>. Je kunt dit <strong className="text-white">onbeperkt</strong> herhalen!</p>
+                </div>
+                <div className="flex gap-3 items-start">
+                  <span className="text-xl shrink-0">🎁</span>
+                  <p style={{ color: '#c4b5fd' }}>Bij je eerste keer krijg je een <strong className="text-white">welkomstbonus van 100 km</strong> cadeau.</p>
+                </div>
+                <div className="flex gap-3 items-start">
+                  <span className="text-xl shrink-0">⚠️</span>
+                  <p style={{ color: '#c4b5fd' }}><strong className="text-orange-300">Schade gemeld?</strong> Je behoudt je schadevrije km tot een maximum van <strong className="text-white">500 km</strong> (mits je die al gereden hebt).</p>
+                </div>
+                <div className="flex gap-3 items-start">
+                  <span className="text-xl shrink-0">💥</span>
+                  <p style={{ color: '#c4b5fd' }}><strong className="text-red-400">Schade niet gemeld?</strong> Je teller wordt gereset naar <strong className="text-white">0 km</strong>.</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {leaderboardLoading ? (
@@ -589,7 +631,7 @@ export default function TabletPage() {
                   <div className="mx-4 mt-4 p-4 bg-[#01b902]/10 border-2 border-[#01b902] rounded-xl flex items-center justify-between">
                     <div>
                       <div className="font-bold text-[#083046]">Alle stops afgerond! 🎉</div>
-                      <div className="text-sm text-gray-500">Sluit de dag af om km's op te slaan.</div>
+                      <div className="text-sm text-gray-500">Sluit de dag af om je kilometers te registreren.</div>
                     </div>
                     <button onClick={openCloseDay} className="px-5 py-2.5 bg-[#01b902] hover:bg-green-600 text-white font-bold rounded-xl text-sm shadow-sm">
                       Dag afsluiten
@@ -607,7 +649,7 @@ export default function TabletPage() {
                   <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6">
                     <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm">
                       <h2 className="text-xl font-bold text-[#083046] mb-1">Dag afsluiten</h2>
-                      <p className="text-sm text-gray-500 mb-5">Vul de chauffeursnaam en gereden kilometers in.</p>
+                      <p className="text-sm text-gray-500 mb-5">Selecteer de chauffeur om de dag af te sluiten.</p>
 
                       <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Chauffeur</label>
                       {drivers.length === 0 ? (
@@ -634,15 +676,16 @@ export default function TabletPage() {
                         </div>
                       )}
 
-                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Kilometers gereden</label>
-                      <input
-                        type="number"
-                        value={kmInput}
-                        onChange={(e) => setKmInput(e.target.value)}
-                        placeholder="bijv. 187"
-                        className="w-full border-2 border-gray-200 focus:border-[#2c80b3] rounded-xl px-4 py-3 text-2xl text-center text-[#083046] outline-none mb-1"
-                      />
-                      <div className="text-xs text-gray-400 text-center mb-6">laat leeg als je het niet weet</div>
+                      {(() => {
+                        const activeRoute = routes.find((r) => (r.vehicleId ?? r.vehicleName) === selectedVehicle)
+                        const km = activeRoute?.totalKm
+                        return km !== undefined ? (
+                          <div className="mb-6 rounded-xl bg-[#083046]/5 border border-[#083046]/10 px-4 py-3 flex items-center justify-between">
+                            <span className="text-sm text-gray-500">Gereden kilometers (berekend)</span>
+                            <span className="text-2xl font-bold text-[#083046]">{km} km</span>
+                          </div>
+                        ) : null
+                      })()}
 
                       <div className="flex gap-3">
                         <button onClick={() => setShowCloseDay(false)} className="flex-1 py-3 rounded-xl border-2 border-gray-200 text-gray-500 font-medium">Annuleer</button>
@@ -712,6 +755,11 @@ export default function TabletPage() {
                       const isDone = status === 'DONE' || status === 'SKIPPED'
                       const elapsed = isInProgress ? elapsedMin(stop.tracking?.startedAt ?? null) : 0
                       const isLast = idx === schedule.length - 1
+                      // Volgorde: alle vorige stops moeten DONE/SKIPPED zijn
+                      const stopIdx = sn - 1
+                      const previousAllDone = scheduledStops.slice(0, stopIdx).every(
+                        (s) => s.stop.tracking?.status === 'DONE' || s.stop.tracking?.status === 'SKIPPED'
+                      )
                       return (
                         <div key={stop.stopKey} className="flex gap-3 items-stretch">
                           <div className="flex flex-col items-center w-10 shrink-0">
@@ -743,19 +791,24 @@ export default function TabletPage() {
                                 <div className="text-xs text-gray-400">{stop.timeWindowStart ? 'tijdvak' : 'gepland'}</div>
                               </div>
                             </div>
-                            {isDone && (
+                            {isDone && isToday && (
                               <div className="px-4 pb-3 pt-1">
                                 <button onClick={() => updateStatus(stop, vid, 'PENDING')} disabled={pendingKey === stop.stopKey} className="w-full py-2.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-400 hover:text-gray-600 font-medium text-sm transition-all disabled:opacity-50">
                                   {pendingKey === stop.stopKey ? '…' : '↩ Ongedaan maken'}
                                 </button>
                               </div>
                             )}
-                            {!isDone && (
+                            {!isDone && isToday && (
                               <div className="px-4 pb-4 pt-1 flex gap-2">
-                                {isPending && (
+                                {isPending && previousAllDone && (
                                   <button onClick={() => updateStatus(stop, vid, 'IN_PROGRESS')} disabled={pendingKey === stop.stopKey} className="flex-1 py-3 rounded-lg bg-[#2c80b3] hover:bg-[#236994] active:scale-[0.98] text-white font-semibold text-base transition-all disabled:opacity-50 shadow-sm">
                                     {pendingKey === stop.stopKey ? '…' : 'Start rit'}
                                   </button>
+                                )}
+                                {isPending && !previousAllDone && (
+                                  <div className="flex-1 py-3 rounded-lg bg-gray-100 text-gray-400 font-medium text-sm text-center">
+                                    Wacht op vorige rit
+                                  </div>
                                 )}
                                 {isInProgress && (
                                   <button onClick={() => updateStatus(stop, vid, 'DONE')} disabled={pendingKey === stop.stopKey} className="flex-1 py-3 rounded-lg bg-[#01b902] hover:bg-green-600 active:scale-[0.98] text-white font-semibold text-base transition-all disabled:opacity-50 shadow-sm">
@@ -778,7 +831,7 @@ export default function TabletPage() {
                   {!allStopsDone && !dayClosed && (
                     <div className="mt-4 pb-6">
                       <button onClick={openCloseDay} className="w-full py-3 rounded-xl border-2 border-gray-200 text-gray-400 hover:border-[#2c80b3] hover:text-[#2c80b3] font-medium text-sm transition-colors">
-                        Dag afsluiten / km's invoeren
+                        Dag afsluiten
                       </button>
                     </div>
                   )}

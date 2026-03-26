@@ -240,12 +240,29 @@ model RitplanningWeek {
 
 // Vaste lijst van bezorgers — beheerd door de planner
 model Driver {
-  id             String   @id @default(cuid())
-  name           String   @unique
-  isActive       Boolean  @default(true)
-  damageFreeKm   Int      @default(0)  // huidige km-streak zonder schade
-  rewardsEarned  Int      @default(0)  // aantal keer €100 beloning ontvangen
-  createdAt      DateTime @default(now())
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  isActive           Boolean  @default(true)
+  damageFreeKm       Int      @default(0)  // huidige km-streak zonder schade
+  rewardsEarned      Int      @default(0)  // aantal keer €100 beloning ontvangen
+  welcomeBonusGiven  Boolean  @default(false)  // eenmalige welkomstbonus van 100km
+  createdAt          DateTime @default(now())
+}
+
+// Log van gemelde en niet-gemelde schades per bezorger
+model DamageReport {
+  id          String   @id @default(cuid())
+  driverName  String
+  driverId    String?
+  isReported  Boolean  // true = schade gemeld, false = schade niet gemeld
+  kmAtTime    Int      // schadevrije km op het moment van de melding
+  reportedBy  String?  // naam van de planner die het heeft ingevoerd
+  note        String?
+  date        String   // YYYY-MM-DD
+  createdAt   DateTime @default(now())
+
+  @@index([driverName])
+  @@index([date])
 }
 
 // Dagregistratie per bezorger: wie reed welke auto, hoeveel km, hoeveel stops

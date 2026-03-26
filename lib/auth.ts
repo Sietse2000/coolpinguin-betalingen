@@ -1,5 +1,7 @@
 export const COOKIE_NAME = 'session'
+export const TABLET_COOKIE_NAME = 'tablet_session'
 export const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 dagen
+export const TABLET_COOKIE_MAX_AGE = 60 * 60 * 24 * 30 // 30 dagen — tablet blijft lang ingelogd
 
 /**
  * Bereken het verwachte sessie-token als HMAC(APP_PASSWORD, SESSION_SECRET).
@@ -15,6 +17,22 @@ export async function computeSessionToken(): Promise<string> {
     false, ['sign']
   )
   const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(password))
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/** Tablet-sessietoken: HMAC(TABLET_PIN, SESSION_SECRET) */
+export async function computeTabletSessionToken(): Promise<string> {
+  const pin = process.env.TABLET_PIN ?? ''
+  const secret = process.env.SESSION_SECRET ?? ''
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw', encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false, ['sign']
+  )
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(pin))
   return Array.from(new Uint8Array(sig))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
