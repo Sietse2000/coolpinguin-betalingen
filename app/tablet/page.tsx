@@ -695,7 +695,19 @@ export default function TabletPage() {
                             <span className="text-sm text-gray-500">Gereden kilometers (berekend)</span>
                             <span className="text-2xl font-bold text-[#083046]">{km} km</span>
                           </div>
-                        ) : null
+                        ) : (
+                          <div className="mb-6">
+                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Gereden kilometers</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={kmInput}
+                              onChange={(e) => setKmInput(e.target.value)}
+                              placeholder="bv. 85"
+                              className="w-full border-2 border-gray-200 focus:border-[#2c80b3] rounded-xl px-4 py-3 text-base text-[#083046] outline-none"
+                            />
+                          </div>
+                        )
                       })()}
 
                       <div className="flex gap-3">
