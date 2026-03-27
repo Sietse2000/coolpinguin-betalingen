@@ -40,9 +40,26 @@ export async function PUT(req: NextRequest) {
   if (!weekStart) return NextResponse.json({ ok: false }, { status: 400 })
 
   try {
+    // Als er al een overlappend plan bestaat voor dezelfde week, gebruik dan
+    // die weekStart — zo lezen tablet én dashboard altijd hetzelfde record,
+    // en blijven StopTracking-records geldig.
+    const reqStart = new Date(weekStart)
+    const reqEnd = new Date(reqStart); reqEnd.setDate(reqStart.getDate() + 6)
+    const existing = await db.ritplanningWeek.findMany({
+      orderBy: { weekStart: 'desc' },
+      take: 10,
+      select: { weekStart: true },
+    })
+    const overlapping = existing.find((p) => {
+      const planStart = new Date(p.weekStart)
+      const planEnd = new Date(planStart); planEnd.setDate(planStart.getDate() + 6)
+      return planStart <= reqEnd && planEnd >= reqStart
+    })
+    const canonicalKey = overlapping?.weekStart ?? weekStart
+
     await db.ritplanningWeek.upsert({
-      where: { weekStart },
-      create: { weekStart, routesJson, knownSourceStops },
+      where: { weekStart: canonicalKey },
+      create: { weekStart: canonicalKey, routesJson, knownSourceStops },
       update: { routesJson, knownSourceStops },
     })
 
