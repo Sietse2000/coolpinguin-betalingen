@@ -112,7 +112,7 @@ const TIJDVAK: Record<string, { start: string; end: string }> = {
  */
 // Alleen echte transport-acties — t1/t2 zijn tijdvak-aanduidingen, geen transporttriggers
 const TRANSPORT_KEYWORDS = [
-  'ophalen', 'transport', 'retour', 'bezorging', 'bezorgen',
+  'ophalen', 'afhaal', 'transport', 'retour', 'bezorging', 'bezorgen',
   'aflevering', 'uitlevering', 'inboedel',
 ]
 
@@ -186,26 +186,102 @@ function parseTitleMeta(
   return { inferredType }
 }
 
+/** Verwijdert HTML-opmaak en zet blokelementen om naar regeleindes */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(div|p|li|tr)[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+}
+
 /**
  * Probeert klantgegevens te parsen uit de beschrijving van een agenda-event.
- * Werkt voor events met velden als "Volledige naam: ...", "Adresregel 1A: ..."
+ *
+ * Ondersteunt twee formaten:
+ * 1. Google Forms-stijl: label op eigen regel, waarde op volgende regel
+ *    (Google stuurt formulierresponses als <b>Label</b><br>Waarde<br><br>...)
+ * 2. Klassiek: "Label: waarde" op één regel (voor handmatig aangemaakte events)
  */
-function parseDescriptionFields(description: string): { customerName?: string; address?: string } {
-  const lines = description.split(/\n|\r\n/)
-  const get = (labels: string[]) => {
+function parseDescriptionFields(description: string): {
+  customerName?: string
+  address?: string
+  timeSlot?: string
+} {
+  const cleaned = stripHtml(description)
+  // Normaliseer meerdere spaties (ook van &nbsp; of Google Forms HTML) naar één spatie
+  const lines = cleaned.split(/\n|\r\n/).map((l) => l.trim().replace(/\s+/g, ' ')).filter(Boolean)
+
+  /**
+   * Vindt een veldwaarde ongeacht het exacte formaat:
+   *   "Label: waarde"        → waarde op dezelfde regel
+   *   "Label:\nwaarde"       → waarde op de volgende regel (label eindigt op :)
+   *   "Label\nwaarde"        → waarde op de volgende regel (label zonder :)
+   */
+  const get = (labels: string[]): string | undefined => {
     for (const label of labels) {
-      const line = lines.find((l) => l.toLowerCase().startsWith(label.toLowerCase()))
-      if (line) return line.split(':').slice(1).join(':').trim()
+      const lowerLabel = label.toLowerCase()
+      for (let i = 0; i < lines.length; i++) {
+        const lower = lines[i].toLowerCase()
+        // "Label: waarde" of "Label : waarde" op één regel
+        if (lower.startsWith(lowerLabel + ':') || lower.startsWith(lowerLabel + ' :')) {
+          const colonIdx = lines[i].indexOf(':')
+          const val = lines[i].slice(colonIdx + 1).trim()
+          // Als de waarde leeg is staat hij op de volgende regel (bv. "Label:" + newline + "waarde")
+          if (val) return val
+          if (i + 1 < lines.length) return lines[i + 1]
+        }
+        // Label staat exact op eigen regel (met of zonder afsluitende dubbele punt)
+        if (lower === lowerLabel || lower === lowerLabel + ':') {
+          if (i + 1 < lines.length) return lines[i + 1]
+        }
+      }
     }
     return undefined
   }
 
-  const customerName = get(['Volledige naam', 'Naam', 'Name', 'Klant'])
-  const street = get(['Adresregel 1A', 'Adres', 'Address', 'Straat'])
-  const city = get(['Postcode', 'Stad', 'City', 'Plaats'])
-  const address = [street, city].filter(Boolean).join(', ') || undefined
+  const NAAM_LABELS   = ['Volledige naam', 'Naam', 'Name', 'Klant', 'Klantnaam']
+  const STRAAT_LABELS = ['Adresregel 1A', 'Adresregel 1', 'Straat en huisnummer',
+                         'Straatnaam en huisnummer', 'Straat + huisnummer', 'Adres', 'Address', 'Straat']
+  const PC_LABELS     = ['Postcode']
+  const STAD_LABELS   = ['Woonplaats', 'Stad', 'City', 'Plaats', 'Gemeente']
+  const TIJD_LABELS   = ['Kies een tijdstip', 'Tijdstip', 'Tijdvak', 'Gewenste bezorgtijd', 'Bezorgtijd', 'Levertijd']
 
-  return { customerName, address }
+  // Sommige formulieren sturen de naam als eerste regel zonder label
+  const customerName = get(NAAM_LABELS) ?? lines[0]
+  const street       = get(STRAAT_LABELS)
+  const postcode     = get(PC_LABELS)
+  const city         = get(STAD_LABELS)
+  const timeSlot     = get(TIJD_LABELS)
+
+  // Combineer postcode en woonplaats (bijv. "5213 HR" + "Den Bosch" → "5213 HR Den Bosch")
+  const postcodeCity = [postcode, city].filter(Boolean).join(' ') || undefined
+  const address = [street, postcodeCity].filter(Boolean).join(', ') || undefined
+
+  console.log('[Google Calendar] parseDescriptionFields →', { customerName, street, postcode, city, address, timeSlot })
+  return { customerName, address, timeSlot }
+}
+
+/**
+ * Parseert een tijdslot-string zoals "Tussen 08:00 - 11:00" of "08:00 - 11:00"
+ * naar start- en eindtijd voor een bepaalde datum.
+ */
+function parseTimeSlot(
+  timeSlot: string,
+  dateOnly: string,
+): Pick<CalendarEvent, 'timeWindowStart' | 'timeWindowEnd'> | null {
+  const match = timeSlot.match(/(\d{1,2})[:.hH](\d{2})\s*[-–]\s*(\d{1,2})[:.hH](\d{2})/)
+  if (!match) return null
+  const [, h1, m1, h2, m2] = match
+  return {
+    timeWindowStart: `${dateOnly}T${String(parseInt(h1)).padStart(2, '0')}:${m1}:00`,
+    timeWindowEnd:   `${dateOnly}T${String(parseInt(h2)).padStart(2, '0')}:${m2}:00`,
+  }
 }
 
 export async function getCalendarEvents(date: Date): Promise<CalendarEvent[]> {
@@ -226,16 +302,30 @@ export async function getCalendarEvents(date: Date): Promise<CalendarEvent[]> {
   })
 
   const events = response.data.items ?? []
-  return events
+  console.log(`[Google Calendar] ${date.toISOString().slice(0,10)}: ${events.length} event(s) opgehaald:`, events.map((e) => e.summary))
+  const filtered = events
     .filter((e) => e.id && (e.start?.dateTime || e.start?.date))
-    .filter((e) => isTransportEvent(e.summary ?? ''))
+    .filter((e) => {
+      const pass = isTransportEvent(e.summary ?? '')
+      if (!pass) console.log(`[Google Calendar] ✗ gefilterd (geen transport-trefwoord): "${e.summary}"`)
+      return pass
+    })
+  console.log(`[Google Calendar] ${filtered.length} event(s) na filter`)
+  return filtered
     .map((e) => {
       const description = e.description ?? ''
       const parsed = description ? parseDescriptionFields(description) : {}
       const title = e.summary ?? '(geen titel)'
       const start = new Date(e.start!.dateTime ?? e.start!.date!)
       const end = new Date(e.end!.dateTime ?? e.end!.date!)
+      const dateOnly = start.toISOString().slice(0, 10)
       const titleMeta = parseTitleMeta(title, start)
+
+      // Tijdvak: titel heeft voorrang; beschrijving is fallback (bijv. "Kies een tijdstip: Tussen 08:00 - 11:00")
+      const descTimeSlot = parsed.timeSlot ? parseTimeSlot(parsed.timeSlot, dateOnly) : null
+      const timeWindowStart = titleMeta.timeWindowStart ?? descTimeSlot?.timeWindowStart
+      const timeWindowEnd   = titleMeta.timeWindowEnd   ?? descTimeSlot?.timeWindowEnd
+
       return {
         id: e.id!,
         title,
@@ -244,8 +334,8 @@ export async function getCalendarEvents(date: Date): Promise<CalendarEvent[]> {
         location: e.location ?? parsed.address ?? undefined,
         customerName: parsed.customerName ?? undefined,
         description: description || undefined,
-        timeWindowStart: titleMeta.timeWindowStart,
-        timeWindowEnd: titleMeta.timeWindowEnd,
+        timeWindowStart,
+        timeWindowEnd,
         inferredType: titleMeta.inferredType,
         couplingAddress: getCouplingAddress(title),
       }

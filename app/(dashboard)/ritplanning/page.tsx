@@ -38,6 +38,7 @@ interface UnifiedStop {
   trailerType?: TrailerType
   couplingAddress?: string // Aanhanger eerst ophalen op dit adres voor bezorging
   durationMin?: number    // Eigen tijdsduur (overschrijft settings.handlingMin voor deze stop)
+  plannedArrival?: string  // Exacte geplande aankomsttijd (ISO), berekend met echte rijtijden
 }
 
 interface ScheduledStop {
@@ -132,14 +133,12 @@ function localDateStr(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-/** Geeft de maandag van de week waarin `d` valt, verschoven met `offsetWeeks` weken */
+/** Geeft vandaag als startdatum, verschoven met `offsetWeeks` weken (7-daags venster vanaf vandaag) */
 function getWeekMonday(offsetWeeks = 0): Date {
   const today = new Date(); today.setHours(0, 0, 0, 0)
-  const dow = today.getDay() // 0=zo, 1=ma, ..., 6=za
-  const daysToMonday = dow === 0 ? -6 : 1 - dow
-  const monday = new Date(today)
-  monday.setDate(today.getDate() + daysToMonday + offsetWeeks * 7)
-  return monday
+  const start = new Date(today)
+  start.setDate(today.getDate() + offsetWeeks * 7)
+  return start
 }
 
 function formatDay(d: Date): string {
@@ -679,18 +678,33 @@ function RitplanningPage() {
   // Auto-save met 2s debounce — sync editRoutes naar allDayRoutesRef, dan opslaan
   useEffect(() => {
     if (editRoutes.length === 0 || !selectedDate) return
-    // Bereken totalKm per route op basis van Google Maps afstandsdata
-    const routesWithKm = editRoutes.map((r) => ({
-      ...r,
-      totalKm: calcRouteKm(r.stops, distancePairsRef.current, depotAddressRef.current) ?? r.totalKm,
-    }))
-    allDayRoutesRef.current = { ...allDayRoutesRef.current, [selectedDate]: routesWithKm }
+    const date = new Date(selectedDate + 'T12:00:00')
+    const routesWithTimes = editRoutes.map((r) => {
+      // Bereken exacte aankomsttijden per stop met echte rijtijden (indien beschikbaar)
+      const schedule = calcSchedule(r.stops, date, settings, r.workStart, r.hasTrailer, travelPairsRef.current, depotAddressRef.current)
+      const arrivalMap = new Map<UnifiedStop, string>()
+      for (const item of schedule) {
+        if (!('isDepotReturn' in item) && !('isCoupling' in item)) {
+          arrivalMap.set(item.stop, item.arrive.toISOString())
+        }
+      }
+      const stops = r.stops.map((stop) => {
+        const arrive = arrivalMap.get(stop)
+        return arrive ? { ...stop, plannedArrival: arrive } : stop
+      })
+      return {
+        ...r,
+        stops,
+        totalKm: calcRouteKm(stops, distancePairsRef.current, depotAddressRef.current) ?? r.totalKm,
+      }
+    })
+    allDayRoutesRef.current = { ...allDayRoutesRef.current, [selectedDate]: routesWithTimes }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       savePlan(weekOffsetRef.current, allDayRoutesRef.current, freshDaysRef.current)
     }, 2000)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [editRoutes, selectedDate, savePlan])
+  }, [editRoutes, selectedDate, savePlan, settings])
 
   // Poll tablet tracking — alleen voor de huidige week (weekOffset === 0)
   useEffect(() => {
@@ -760,6 +774,7 @@ function RitplanningPage() {
 
   // Echte rijtijden + afstanden (Google Maps Distance Matrix) — gedeeld over alle routes
   const [travelPairs, setTravelPairs] = useState<TravelPairs>({})
+  const travelPairsRef = useRef<TravelPairs>({})
   const [distancePairs, setDistancePairs] = useState<Record<string, number>>({})
   const distancePairsRef = useRef<Record<string, number>>({})
   const [depotAddress, setDepotAddress] = useState<string>('')
@@ -802,7 +817,11 @@ function RitplanningPage() {
       const data = await res.json() as { depot: string; pairs: TravelPairs; distancePairs: Record<string, number> }
       if (data.depot) { setDepotAddress(data.depot); depotAddressRef.current = data.depot }
       if (data.pairs && Object.keys(data.pairs).length > 0) {
-        setTravelPairs((prev) => ({ ...prev, ...data.pairs }))
+        setTravelPairs((prev) => {
+          const merged = { ...prev, ...data.pairs }
+          travelPairsRef.current = merged
+          return merged
+        })
       }
       if (data.distancePairs && Object.keys(data.distancePairs).length > 0) {
         setDistancePairs((prev) => {
@@ -1050,6 +1069,8 @@ function RitplanningPage() {
             const id = stopExternalId(s)
             return id && !assignedIds.has(id)
           })
+          console.log('[loadData] merged routes:', merged.map((r) => ({ v: r.vehicleName, stops: r.stops.length })))
+          console.log('[loadData] newStops:', newStops.map((s) => ({ type: s.type, name: s.customerName ?? s.calendarTitle })))
           if (newStops.length > 0) {
             // Voeg nieuwe stops toe aan bestaande routes (fill-first), zonder de volgorde van bestaande stops te wijzigen
             routes = [...merged]
@@ -1057,7 +1078,7 @@ function RitplanningPage() {
               let placed = false
               for (const route of routes) {
                 if (canFitStop(route, stop, initialDay.date, settings, travelPairs, depotAddress)) {
-                  route.stops = sortStops([...route.stops, stop])
+                  route.stops = insertNewStop(route.stops, stop)
                   placed = true
                   break
                 }
@@ -1065,7 +1086,7 @@ function RitplanningPage() {
               if (!placed && routes.length > 0) {
                 // Past nergens — zet bij de route met de minste stops
                 const lightest = routes.reduce((a, b) => a.stops.length <= b.stops.length ? a : b)
-                lightest.stops = sortStops([...lightest.stops, stop])
+                lightest.stops = insertNewStop(lightest.stops, stop)
               }
             }
           } else {
@@ -1128,6 +1149,19 @@ function RitplanningPage() {
       const bT = b.timeWindowStart ? new Date(b.timeWindowStart).getTime() : b.flexible ? 2e15 : 1e15
       return aT - bT
     })
+  }
+
+  /** Voeg een nieuwe stop in zonder de bestaande volgorde te wijzigen.
+   *  Met tijdvak: invoegen vóór de eerste bestaande stop met een later tijdvak.
+   *  Zonder tijdvak: toevoegen aan het einde. */
+  function insertNewStop(existingStops: UnifiedStop[], newStop: UnifiedStop): UnifiedStop[] {
+    if (!newStop.timeWindowStart) return [...existingStops, newStop]
+    const newTime = new Date(newStop.timeWindowStart).getTime()
+    const insertAt = existingStops.findIndex(
+      (s) => s.timeWindowStart && new Date(s.timeWindowStart).getTime() > newTime,
+    )
+    if (insertAt === -1) return [...existingStops, newStop]
+    return [...existingStops.slice(0, insertAt), newStop, ...existingStops.slice(insertAt)]
   }
 
   function moveStop(stop: UnifiedStop, fromIdx: number, toIdx: number) {

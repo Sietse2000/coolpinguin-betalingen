@@ -20,6 +20,7 @@ interface TabletStop {
   date: string
   timeWindowStart?: string
   timeWindowEnd?: string
+  plannedArrival?: string
   durationMin?: number
   type: string
   trailerType?: TrailerType
@@ -807,11 +808,27 @@ export default function TabletPage() {
                                 {stop.address && <div className="text-sm text-gray-500 mt-0.5">{stop.address}</div>}
                               </div>
                               <div className="text-right shrink-0">
-                                <div className="text-sm font-semibold text-[#083046]">
-                                  {stop.timeWindowStart ? fmtIso(stop.timeWindowStart) : `≈ ${fmtTime(schedStop.arrive)}`}
-                                  {stop.timeWindowEnd ? ` – ${fmtIso(stop.timeWindowEnd)}` : ` – ${fmtTime(schedStop.depart)}`}
-                                </div>
-                                <div className="text-xs text-gray-400">{stop.timeWindowStart ? 'tijdvak' : 'gepland'}</div>
+                                {stop.timeWindowStart ? (
+                                  <>
+                                    <div className="text-sm font-semibold text-[#083046]">
+                                      {fmtIso(stop.timeWindowStart)}
+                                      {stop.timeWindowEnd ? ` – ${fmtIso(stop.timeWindowEnd)}` : ''}
+                                    </div>
+                                    <div className="text-xs text-gray-400">tijdvak</div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="text-sm font-semibold text-[#083046]">
+                                      {stop.plannedArrival ? fmtIso(stop.plannedArrival) : `≈ ${fmtTime(schedStop.arrive)} – ${fmtTime(schedStop.depart)}`}
+                                    </div>
+                                    <div className="text-xs text-gray-400">gepland</div>
+                                    {stop.timeWindowEnd && (
+                                      <div className="text-xs font-semibold text-orange-500 mt-0.5">
+                                        uiterlijk {fmtIso(stop.timeWindowEnd)}
+                                      </div>
+                                    )}
+                                  </>
+                                )}
                               </div>
                             </div>
                             {isDone && isToday && (
