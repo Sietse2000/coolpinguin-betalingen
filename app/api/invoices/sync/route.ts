@@ -75,6 +75,10 @@ export async function POST() {
       if (isNaN(totalAmount) || isNaN(openAmount)) continue
 
       const statusLabel = inv['Status'] ? String(inv['Status']) : null
+      const customFields = inv['CustomFields'] && typeof inv['CustomFields'] === 'object'
+        ? inv['CustomFields'] as Record<string, unknown>
+        : null
+      const label = customFields?.['CUST_Label'] ? String(customFields['CUST_Label']) : null
 
       try {
         await db.invoiceCache.upsert({
@@ -87,6 +91,7 @@ export async function POST() {
             invoiceDate: inv['InvoiceDate'] ? new Date(String(inv['InvoiceDate'])) : null,
             dueDate: inv['DueDate'] ? new Date(String(inv['DueDate'])) : null,
             status: statusLabel,
+            label,
             rawData: inv as object,
             syncedAt: new Date(),
             updatedAt: new Date(),
@@ -100,6 +105,7 @@ export async function POST() {
             invoiceDate: inv['InvoiceDate'] ? new Date(String(inv['InvoiceDate'])) : null,
             dueDate: inv['DueDate'] ? new Date(String(inv['DueDate'])) : null,
             status: statusLabel,
+            label,
             rawData: inv as object,
           },
         })

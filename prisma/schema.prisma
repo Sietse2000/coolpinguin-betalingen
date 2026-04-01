@@ -67,6 +67,7 @@ model InvoiceCache {
   invoiceDate  DateTime?
   dueDate      DateTime?
   status       String?
+  label        String?
   rawData      Json?
   syncedAt     DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -74,6 +75,7 @@ model InvoiceCache {
   @@index([openAmount])
   @@index([customerName])
   @@index([invoiceId])
+  @@index([label])
 }
 
 // Permanente log van elke RentMagic API-aanroep — nooit verwijderen

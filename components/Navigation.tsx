@@ -20,6 +20,7 @@ const sections = [
       { href: '/transactions', label: 'Alle transacties',    icon: '≡' },
       { href: '/processed',    label: 'Verwerkt',            icon: '✓' },
       { href: '/invoices',     label: 'Facturen',            icon: '◈' },
+      { href: '/debiteuren',   label: 'Debiteuren',          icon: '€' },
       { href: '/rules',        label: 'Beslisregels',        icon: 'i' },
     ],
   },
