@@ -68,6 +68,8 @@ model InvoiceCache {
   dueDate      DateTime?
   status       String?
   label        String?
+  totalExcVat  Decimal?  @db.Decimal(12, 2)
+  totalVat     Decimal?  @db.Decimal(12, 2)
   rawData      Json?
   syncedAt     DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

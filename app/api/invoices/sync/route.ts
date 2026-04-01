@@ -15,46 +15,36 @@ export async function POST() {
   try {
     const BASE_URL = process.env.RENTMAGIC_BASE_URL?.replace(/\/$/, '') ?? ''
     const API_KEY = process.env.RENTMAGIC_API_KEY ?? ''
-    const url = `${BASE_URL}/api/v2/invoices?token=${encodeURIComponent(API_KEY)}&index=1&size=500&sortOn=InvoiceID&sortReverse=true`
-
-    console.log('[Sync] Ophalen facturen:', url.replace(API_KEY, '***'))
-
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-    })
-
-    const rawText = await res.text()
-    console.log('[Sync] Status:', res.status, '| Preview:', rawText.slice(0, 300))
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: `RentMagic fout: ${res.status} ${rawText.slice(0, 200)}` },
-        { status: 502 }
-      )
+    // Haal alle facturen op via paginering (500 per batch) totdat alles binnen is
+    const PAGE_SIZE = 500
+    const fetchBatch = async (index: number): Promise<{ items: Record<string, unknown>[]; total: number }> => {
+      const url = `${BASE_URL}/api/v2/invoices?token=${encodeURIComponent(API_KEY)}&index=${index}&size=${PAGE_SIZE}&sortOn=InvoiceID&sortReverse=false&Status=Open`
+      const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' })
+      if (!res.ok) throw new Error(`RentMagic fout: ${res.status}`)
+      const data = await res.json() as Record<string, unknown>
+      const items: Record<string, unknown>[] = Array.isArray(data)
+        ? data
+        : Array.isArray(data['Collection']) ? data['Collection'] as Record<string, unknown>[]
+        : Array.isArray(data['Items']) ? data['Items'] as Record<string, unknown>[]
+        : []
+      const total = typeof data['Total'] === 'number' ? data['Total'] : items.length
+      return { items, total }
     }
 
-    let data: unknown
-    try {
-      data = JSON.parse(rawText)
-    } catch {
-      return NextResponse.json({ error: 'Ongeldige JSON van RentMagic' }, { status: 502 })
-    }
+    const first = await fetchBatch(1)
+    const totalPages = Math.ceil(first.total / PAGE_SIZE)
+    console.log(`[Sync] Totaal in RentMagic: ${first.total}, pagina's: ${totalPages}`)
 
-    // Ondersteun array, { Collection }, { Items }, { invoices }, { data }
-    let invoices: Record<string, unknown>[] = []
-    if (Array.isArray(data)) {
-      invoices = data
-    } else if (data && typeof data === 'object') {
-      const d = data as Record<string, unknown>
-      const candidate = d['Collection'] ?? d['Items'] ?? d['invoices'] ?? d['data'] ?? d['Invoices']
-      if (Array.isArray(candidate)) {
-        invoices = candidate as Record<string, unknown>[]
-      } else {
-        console.log('[Sync] Onbekende response-structuur, keys:', Object.keys(d).join(', '))
-      }
+    const remainingBatches = totalPages > 1
+      ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, i) => fetchBatch(i + 2)))
+      : []
+
+    const invoiceMap = new Map<string, Record<string, unknown>>()
+    for (const inv of [...first.items, ...remainingBatches.flatMap((b) => b.items)]) {
+      const id = String(inv['InvoiceID'] ?? inv['ID'] ?? '').trim().toUpperCase()
+      if (id) invoiceMap.set(id, inv)
     }
+    const invoices = Array.from(invoiceMap.values())
 
     console.log(`[Sync] Ontvangen: ${invoices.length} facturen`)
     if (invoices.length > 0) {
@@ -73,12 +63,15 @@ export async function POST() {
       const openAmount = parseFloat(String(inv['Balance'] ?? inv['OpenAmount'] ?? inv['TotalAmount'] ?? inv['Amount'] ?? 0))
 
       if (isNaN(totalAmount) || isNaN(openAmount)) continue
+      // Sla facturen met saldo 0 over — die zijn al vereffend
+      if (openAmount === 0) continue
 
       const statusLabel = inv['Status'] ? String(inv['Status']) : null
-      const customFields = inv['CustomFields'] && typeof inv['CustomFields'] === 'object'
-        ? inv['CustomFields'] as Record<string, unknown>
-        : null
-      const label = customFields?.['CUST_Label'] ? String(customFields['CUST_Label']) : null
+      // Label zit in Label[0].Description (array van objecten met Key/Description)
+      const labelArr = Array.isArray(inv['Label']) ? inv['Label'] as Record<string, unknown>[] : null
+      const label = labelArr?.[0]?.['Description'] ? String(labelArr[0]['Description']) : null
+      const totalExcVat = inv['TotalExcVAT'] != null ? parseFloat(String(inv['TotalExcVAT'])) : null
+      const totalVat    = inv['TotalVAT']    != null ? parseFloat(String(inv['TotalVAT']))    : null
 
       try {
         await db.invoiceCache.upsert({
@@ -92,6 +85,8 @@ export async function POST() {
             dueDate: inv['DueDate'] ? new Date(String(inv['DueDate'])) : null,
             status: statusLabel,
             label,
+            totalExcVat: totalExcVat != null && !isNaN(totalExcVat) ? totalExcVat : null,
+            totalVat:    totalVat    != null && !isNaN(totalVat)    ? totalVat    : null,
             rawData: inv as object,
             syncedAt: new Date(),
             updatedAt: new Date(),
@@ -106,6 +101,8 @@ export async function POST() {
             dueDate: inv['DueDate'] ? new Date(String(inv['DueDate'])) : null,
             status: statusLabel,
             label,
+            totalExcVat: totalExcVat != null && !isNaN(totalExcVat) ? totalExcVat : null,
+            totalVat:    totalVat    != null && !isNaN(totalVat)    ? totalVat    : null,
             rawData: inv as object,
           },
         })

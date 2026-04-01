@@ -1,26 +1,31 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-// Labels zoals ze in RentMagic staan (CUST_Label)
+// Labels zoals ze in RentMagic staan (CUST_Label) — vul aan met exacte spellingen uit RentMagic
 const CATEGORIEEN = [
-  { key: 'wachten',     labels: ['Wachten op betaling'],                  kleur: 'blue'   },
-  { key: 'herinnering1', labels: ['Eerste herinnering gekregen'],          kleur: 'yellow' },
-  { key: 'herinnering2', labels: ['Tweede herinnering gekregen'],          kleur: 'orange' },
-  { key: 'credifxx',    labels: ['Wordt behandeld door credifixx', 'Credifixx', 'credifixx'], kleur: 'red' },
-  { key: 'overig',      labels: null,                                      kleur: 'gray'   },
+  { key: 'wachten',      labels: ['Wachten op betaling', 'Wachten'],                            kleur: 'blue'   },
+  { key: 'herinnering1', labels: ['Eerste herinnering gekregen', 'Eerste herinnering', '1e herinnering'],  kleur: 'yellow' },
+  { key: 'herinnering2', labels: ['Tweede herinnering gekregen', 'Tweede herinnering', '2e herinnering'],  kleur: 'orange' },
+  { key: 'credifxx',     labels: ['Wordt behandeld door Credifixx', 'Wordt behandeld door credifixx', 'Credifixx'],  kleur: 'red'    },
+  { key: 'overig',       labels: null,                                                           kleur: 'gray'   },
 ]
 
 export async function GET() {
-  // Haal alle facturen met openAmount > 0 op (excl. betaald label)
+  // Haal alle facturen op zonder het label 'Betaald' (incl. facturen zonder label)
+  // Let op: NOT + in sluit NULL-waarden uit in SQL — OR: null expliciet meenemen
   const facturen = await db.invoiceCache.findMany({
     where: {
-      openAmount: { gt: 0 },
-      NOT: { label: 'Betaald' },
+      OR: [
+        { label: null },
+        { label: { notIn: ['Betaald', 'betaald'] } },
+      ],
     },
     select: {
       invoiceId: true,
       customerName: true,
       openAmount: true,
+      totalExcVat: true,
+      totalVat: true,
       invoiceDate: true,
       dueDate: true,
       label: true,
@@ -50,7 +55,7 @@ export async function GET() {
     return {
       key: cat.key,
       kleur: cat.kleur,
-      label: cat.labels?.[0] ?? 'Overig / geen label',
+      label: cat.labels?.[0] ?? 'Openstaand (geen label)',
       aantal: items.length,
       totaal,
       facturen: items,
