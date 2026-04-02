@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 
@@ -8,6 +8,7 @@ export default function TabletLoginPage() {
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
   async function submit(p: string) {
@@ -27,31 +28,15 @@ export default function TabletLoginPage() {
       setError(data.error ?? 'Onjuiste PIN')
       setPin('')
       setLoading(false)
+      inputRef.current?.focus()
     }
   }
 
-  function press(digit: string) {
-    if (loading) return
-    const next = pin + digit
-    setPin(next)
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value.replace(/\D/g, '').slice(0, 4)
+    setPin(val)
     setError('')
-    if (next.length >= 4) submit(next)
-  }
-
-  function backspace() {
-    if (loading) return
-    setPin((p) => p.slice(0, -1))
-    setError('')
-  }
-
-  // onTouchStart + preventDefault() = directe response op touch, voorkomt 300ms delay
-  // en onderdrukt het gesynthesiseerde click-event zodat onClick niet dubbel vuurt.
-  // onClick = fallback voor desktop/muis.
-  function makeHandlers(fn: () => void) {
-    return {
-      onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); fn() },
-      onClick: fn,
-    }
+    if (val.length >= 4) submit(val)
   }
 
   const dots = Array.from({ length: 4 }, (_, i) => i < pin.length)
@@ -75,7 +60,7 @@ export default function TabletLoginPage() {
         className="rounded-3xl px-10 py-10 w-full max-w-xs flex flex-col items-center"
         style={{
           backgroundColor: '#ffffff',
-          border: '2px solid rgba(255,255,255,0.6)',
+          border: '2px solid rgba(255,255,255,0.3)',
           boxShadow: '0 8px 48px rgba(0,0,0,0.5)',
         }}
       >
@@ -100,72 +85,36 @@ export default function TabletLoginPage() {
           <div className="text-sm text-red-500 mb-4 font-medium">{error}</div>
         )}
 
-        {/* Numpad */}
-        <div className="grid grid-cols-3 gap-3 w-full">
-          {['1','2','3','4','5','6','7','8','9'].map((d) => (
-            <button
-              key={d}
-              {...makeHandlers(() => press(d))}
-              disabled={loading}
-              className="select-none"
-              style={{
-                height: 64,
-                borderRadius: 16,
-                fontSize: 24,
-                fontWeight: 600,
-                color: '#083046',
-                backgroundColor: '#e8edf2',
-                border: '1px solid #c8d4de',
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-                touchAction: 'manipulation',
-                opacity: loading ? 0.4 : 1,
-              }}
-            >
-              {d}
-            </button>
-          ))}
-          <div />
-          <button
-            {...makeHandlers(() => press('0'))}
-            disabled={loading}
-            className="select-none"
-            style={{
-              height: 64,
-              borderRadius: 16,
-              fontSize: 24,
-              fontWeight: 600,
-              color: '#083046',
-              backgroundColor: '#e8edf2',
-              border: '1px solid #c8d4de',
-              cursor: 'pointer',
-              WebkitTapHighlightColor: 'transparent',
-              touchAction: 'manipulation',
-              opacity: loading ? 0.4 : 1,
-            }}
-          >
-            0
-          </button>
-          <button
-            {...makeHandlers(backspace)}
-            disabled={loading || pin.length === 0}
-            className="select-none"
-            style={{
-              height: 64,
-              borderRadius: 16,
-              fontSize: 24,
-              color: '#6b7280',
-              backgroundColor: '#e8edf2',
-              border: '1px solid #c8d4de',
-              cursor: loading || pin.length === 0 ? 'default' : 'pointer',
-              WebkitTapHighlightColor: 'transparent',
-              touchAction: 'manipulation',
-              opacity: loading || pin.length === 0 ? 0.4 : 1,
-            }}
-          >
-            ←
-          </button>
-        </div>
+        {/* Native input — opent het numerieke toetsenbord van het tablet zelf */}
+        <input
+          ref={inputRef}
+          type="tel"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={pin}
+          onChange={handleChange}
+          disabled={loading}
+          autoFocus
+          maxLength={4}
+          placeholder="····"
+          style={{
+            width: '100%',
+            padding: '16px',
+            fontSize: 32,
+            fontWeight: 700,
+            textAlign: 'center',
+            letterSpacing: '0.5em',
+            borderRadius: 16,
+            border: '2px solid #c8d4de',
+            backgroundColor: '#f0f4f8',
+            color: '#083046',
+            outline: 'none',
+            caretColor: '#083046',
+            WebkitAppearance: 'none',
+          }}
+          onFocus={(e) => (e.target.style.borderColor = '#083046')}
+          onBlur={(e) => (e.target.style.borderColor = '#c8d4de')}
+        />
 
         {loading && (
           <div className="mt-6 text-sm text-gray-400">Controleren…</div>
