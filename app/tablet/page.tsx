@@ -167,12 +167,16 @@ export default function TabletPage() {
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [showSpelregels, setShowSpelregels] = useState(false)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     // Bij datumwissel: reset gewiste namen zodat DB-waarden van nieuwe datum gewoon hersteld worden
     if (loadedDateRef.current !== date) {
       clearedDriversRef.current.clear()
       loadedDateRef.current = date
     }
+    // Timeout van 15 seconden zodat de pagina niet eeuwig blijft laden op trage apparaten
+    const timeoutId = setTimeout(() => setLoading(false), 15_000)
     try {
       const [routesRes, sessionsRes] = await Promise.all([
         fetch(`/api/tablet/routes?date=${date}`),
@@ -184,6 +188,7 @@ export default function TabletPage() {
       setRoutes(newRoutes)
       setWeekStart(routesData.weekStart ?? '')
       setLastRefresh(new Date())
+      setLoadError(null)
       setSelectedVehicle((prev) =>
         prev && newRoutes.some((r) => (r.vehicleId ?? r.vehicleName) === prev)
           ? prev
@@ -197,7 +202,10 @@ export default function TabletPage() {
         if (key && s.driverName && !clearedDriversRef.current.has(key)) nameMap[key] = s.driverName
       }
       setRouteDriverNames(nameMap)
+    } catch (e) {
+      setLoadError(String(e))
     } finally {
+      clearTimeout(timeoutId)
       setLoading(false)
     }
   }, [date])
@@ -291,7 +299,27 @@ export default function TabletPage() {
   )
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-screen bg-gray-50 text-[#083046] text-xl font-medium">Laden…</div>
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 gap-4">
+        <div className="text-[#083046] text-xl font-medium">Laden…</div>
+        <div className="text-sm text-gray-400">Even geduld, data wordt opgehaald</div>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 gap-4 px-8 text-center">
+        <div className="text-[#083046] text-xl font-bold">Kan data niet laden</div>
+        <div className="text-sm text-gray-500">{loadError}</div>
+        <button
+          onClick={() => { setLoading(true); setLoadError(null); load() }}
+          style={{ padding: '12px 24px', backgroundColor: '#083046', color: '#fff', borderRadius: 12, border: 'none', fontSize: 16, fontWeight: 700 }}
+        >
+          Opnieuw proberen
+        </button>
+      </div>
+    )
   }
 
   return (
