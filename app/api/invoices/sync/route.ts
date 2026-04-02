@@ -18,7 +18,7 @@ export async function POST() {
     // Haal alle facturen op via paginering (500 per batch) totdat alles binnen is
     const PAGE_SIZE = 500
     const fetchBatch = async (index: number): Promise<{ items: Record<string, unknown>[]; total: number }> => {
-      const url = `${BASE_URL}/api/v2/invoices?token=${encodeURIComponent(API_KEY)}&index=${index}&size=${PAGE_SIZE}&sortOn=InvoiceID&sortReverse=false&Status=Open`
+      const url = `${BASE_URL}/api/v2/invoices?token=${encodeURIComponent(API_KEY)}&index=${index}&size=${PAGE_SIZE}&sortOn=InvoiceID&sortReverse=false`
       const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' })
       if (!res.ok) throw new Error(`RentMagic fout: ${res.status}`)
       const data = await res.json() as Record<string, unknown>
