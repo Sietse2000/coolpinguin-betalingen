@@ -81,25 +81,25 @@ export default function TabletLoginPage() {
           {['1','2','3','4','5','6','7','8','9'].map((d) => (
             <button
               key={d}
-              onClick={() => press(d)}
+              onPointerDown={(e) => { e.preventDefault(); press(d) }}
               disabled={loading}
-              className="h-16 rounded-2xl text-2xl font-semibold text-[#083046] bg-gray-100 active:bg-gray-200 transition-colors disabled:opacity-40 select-none"
+              className="h-16 rounded-2xl text-2xl font-semibold text-[#083046] bg-gray-100 active:bg-gray-200 transition-colors disabled:opacity-40 select-none touch-manipulation"
             >
               {d}
             </button>
           ))}
           <div />
           <button
-            onClick={() => press('0')}
+            onPointerDown={(e) => { e.preventDefault(); press('0') }}
             disabled={loading}
-            className="h-16 rounded-2xl text-2xl font-semibold text-[#083046] bg-gray-100 active:bg-gray-200 transition-colors disabled:opacity-40 select-none"
+            className="h-16 rounded-2xl text-2xl font-semibold text-[#083046] bg-gray-100 active:bg-gray-200 transition-colors disabled:opacity-40 select-none touch-manipulation"
           >
             0
           </button>
           <button
-            onClick={backspace}
+            onPointerDown={(e) => { e.preventDefault(); if (!loading && pin.length > 0) backspace() }}
             disabled={loading || pin.length === 0}
-            className="h-16 rounded-2xl text-2xl text-gray-400 bg-gray-100 active:bg-gray-200 transition-colors disabled:opacity-40 select-none"
+            className="h-16 rounded-2xl text-2xl text-gray-400 bg-gray-100 active:bg-gray-200 transition-colors disabled:opacity-40 select-none touch-manipulation"
           >
             ←
           </button>

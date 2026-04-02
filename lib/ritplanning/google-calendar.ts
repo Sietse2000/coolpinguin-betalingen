@@ -116,6 +116,17 @@ const TRANSPORT_KEYWORDS = [
   'aflevering', 'uitlevering', 'inboedel',
 ]
 
+/**
+ * Trefwoorden die een event uitsluiten van de ritten, ook al matcht het een
+ * transport-trefwoord. Gebruik dit voor situaties waarbij de klant zelf naar
+ * de zaak komt en er dus geen bezorgrit nodig is.
+ *
+ * "afhalen" = klant haalt zelf op bij ons → geen rit plannen.
+ */
+const SKIP_KEYWORDS = [
+  'afhalen',
+]
+
 function matchesWord(text: string, keyword: string): boolean {
   const idx = text.indexOf(keyword)
   if (idx === -1) return false
@@ -128,6 +139,13 @@ function matchesWord(text: string, keyword: string): boolean {
 
 function isTransportEvent(title: string): boolean {
   const lower = title.toLowerCase()
+
+  const skipped = SKIP_KEYWORDS.find((kw) => matchesWord(lower, kw))
+  if (skipped) {
+    console.log(`[Google Calendar] "${title}" → overgeslagen (klant komt zelf ophalen: "${skipped}")`)
+    return false
+  }
+
   const matched = TRANSPORT_KEYWORDS.find((kw) => matchesWord(lower, kw))
   if (matched) {
     console.log(`[Google Calendar] "${title}" → transport (trefwoord: "${matched}")`)
