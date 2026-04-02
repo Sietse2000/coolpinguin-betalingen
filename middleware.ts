@@ -22,8 +22,21 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  // ── Tablet pagina's: geen auth vereist ────────────────────────────────────
+  // ── Tablet pagina's: apart cookie ──────────────────────────────────────────
   if (pathname === '/tablet' || pathname.startsWith('/tablet/')) {
+    const tabletSession = req.cookies.get(TABLET_COOKIE_NAME)?.value
+    if (!tabletSession) {
+      const url = req.nextUrl.clone()
+      url.pathname = '/tablet/login'
+      return NextResponse.redirect(url)
+    }
+    const { computeTabletSessionToken } = await import('@/lib/auth')
+    const expected = await computeTabletSessionToken()
+    if (tabletSession !== expected) {
+      const url = req.nextUrl.clone()
+      url.pathname = '/tablet/login'
+      return NextResponse.redirect(url)
+    }
     return NextResponse.next()
   }
 
