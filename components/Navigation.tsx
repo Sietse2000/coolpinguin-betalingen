@@ -32,12 +32,19 @@ export default function Navigation() {
   return (
     <nav className="fixed left-0 top-0 h-full w-60 flex flex-col" style={{ backgroundColor: '#083046' }}>
       {/* Logo */}
-      <div className="px-5 py-4 border-b border-white/20">
+      <div className="px-5 py-4 border-b border-white/20 flex items-center gap-3">
+        <Image
+          src="/penguin.png"
+          alt="Coolpinguin"
+          width={36}
+          height={36}
+          style={{ objectFit: 'contain', filter: 'brightness(0) invert(1)' }}
+        />
         <Image
           src="/Coolpinguin Logo wit rental & sales.png"
           alt="Coolpinguin"
-          width={160}
-          height={60}
+          width={130}
+          height={50}
           style={{ objectFit: 'contain', objectPosition: 'left' }}
         />
       </div>
